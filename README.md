@@ -6,14 +6,14 @@ O Studio é um repositório independente. Por padrão, ele acessa o FarmGuard so
 
 ## O que já está integrado
 
-- panorama do dataset de anotações, boxes e armadilhas;
+- panorama do dataset completo (incluindo imagens ainda não revisadas), boxes e armadilhas;
 - catálogo automático de pesos `.pt`, incluindo `best.pt` e `last.pt` dos runs;
 - leitura dos históricos `results.csv` e comparação de curvas por época;
 - tabela de calibração do `threshold-sweep.csv`;
-- galeria das predições existentes;
+- galeria das predições existentes com visualização em tela cheia e zoom;
 - central de operações para `train.py`, `val.py`, `predict.py` e `tune_thresholds.py`;
 - reconstrução do `DatasetYolo` e backup do dataset fonte no Google Drive;
-- anotador web com criação, seleção, movimento, redimensionamento e exclusão de boxes, zoom, pan e desfazer;
+- anotador web com fila priorizada como no Flutter, filtros por revisão, criação e edição de boxes, zoom sem rolar a página, gesto de dois dedos, desfazer/refazer e conclusão com avanço para a próxima pendente;
 - publicação controlada de rascunhos, com diff, backup local e reconstrução do YOLO;
 - autenticação por sessão, limitação de tentativas e cookies seguros para acesso remoto.
 - aplicativo instalável na Tela de Início do iPhone, com interface ajustada para toque e tela segura;
@@ -52,6 +52,10 @@ PORT=4310
 
 O Studio detecta automaticamente o `rclone` gerenciado pelo NTE Localization Studio. A fonte de verdade é sincronizada em `Insect AI Datasets/traps_events`; rascunhos ainda não publicados ficam em `studio-drafts`.
 
+Para listar também as imagens sem JSON de anotação, o Studio lê `data/sources/traps_events.parquet`. Use **Anotador → Atualizar Parquet** para substituir essa cópia pela versão mais recente; a cópia anterior é arquivada em `data/sources/archive`. As imagens pendentes são baixadas sob demanda para `data/image-cache`, sem alterar o FarmGuard. A fila coloca pendentes FARMLAB primeiro, depois outras pendentes e, por fim, revisadas. O botão **Salvar rascunho** não marca uma imagem como revisada; **Concluir + próxima pendente** marca e avança.
+
+**Predizer** usa o modelo escolhido no conjunto atual `DatasetYolo/images/val`, gerando imagens com boxes em `Iazinha/Training/predictions`. Portanto ele não usa automaticamente todas as fotos revisadas: a divisão de validação depende da última geração do DatasetYolo. O nome do lote é opcional; quando vazio, o Studio cria um identificador com data/hora para evitar sobrescrever uma galeria anterior.
+
 “Importar novos arquivos” usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. “Fazer backup agora” envia o estado local de forma não destrutiva.
 
 ## Cloudflare Tunnel
@@ -78,6 +82,7 @@ O login do Studio continua obrigatório atrás do tunnel. Para uma segunda camad
 
 - leitura: arquivos do FarmGuard;
 - escrita do anotador: `FarmGuard-Studio/data/annotation-drafts`;
+- catálogo Parquet e cache de imagens pendentes: `FarmGuard-Studio/data/sources` e `data/image-cache`;
 - histórico de tarefas: `FarmGuard-Studio/data/jobs`;
 - backups antes de publicação: `FarmGuard-Studio/data/publication-backups`;
 - publicação autorizada: `FarmGuard/Iazinha/DatasetCreator/.../annotations` e `DatasetYolo`;

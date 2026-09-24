@@ -57,7 +57,14 @@ async function buildCommand(type: JobType, options: Record<string, unknown>) {
   if (type === 'predict') {
     const args = [path.join(studioRoot, 'server', 'python', 'predict.py')];
     if (options.model) args.push('--model', String(options.model));
-    args.push('--name', safeName(options.name, `studio-predict-${Date.now()}`));
+    const name = safeName(options.name, `studio-predict-${Date.now()}`);
+    try {
+      await fs.access(path.join(farmPaths.predictions, name));
+      throw new Error(`Já existe uma galeria chamada ${name}. Escolha outro nome ou deixe o campo vazio.`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    args.push('--name', name);
     return [python, ...args];
   }
   if (type === 'dataset') {

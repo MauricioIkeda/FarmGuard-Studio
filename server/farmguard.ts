@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, farmPaths } from './config.js';
 import { backupDraft, driveStatus } from './drive.js';
+import { dimensions, imageFor, sourceImage, sourceImages } from './annotation-source.js';
 
 export type AnnotationBox = {
   x: number;
@@ -196,7 +197,17 @@ export async function getAnnotation(key: string): Promise<Annotation | null> {
     `${key}.json`,
   );
   const target = (await exists(draft)) ? draft : original;
-  if (!(await exists(target))) return null;
+  if (!(await exists(target))) {
+    const source = await sourceImage(key);
+    if (!source) return null;
+    const { width, height } = await dimensions(await imageFor(source));
+    return {
+      schema_version: 4, key, image: source.image, width, height,
+      reviewed: false, excluded: false, class: 'insect', boxes: [],
+      source: { type: 'parquet', url: source.url, metadata: source.metadata },
+      studioDraft: false,
+    };
+  }
   const annotation = JSON.parse(await fs.readFile(target, 'utf8')) as Annotation;
   annotation.studioDraft = target === draft;
   return annotation;
@@ -207,7 +218,7 @@ export async function saveDraft(key: string, input: Annotation) {
     throw new Error('Identificador de anotacao invalido.');
   }
   const original = await getAnnotation(key);
-  if (!original) throw new Error('Anotacao original nao encontrada.');
+  if (!original) throw new Error('Imagem não encontrada na fonte de dados.');
   const clean: Annotation = {
     ...input,
     schema_version: input.schema_version || 4,
@@ -237,7 +248,7 @@ export async function saveDraft(key: string, input: Annotation) {
 export async function overview() {
   const [annotations, runs, directModels, runModels, predictions, drive] =
     await Promise.all([
-      listAnnotations(),
+      annotationSummaries(),
       listRuns(),
       walkWeights(farmPaths.models, 'model'),
       walkWeights(farmPaths.runs, 'run'),
@@ -248,8 +259,8 @@ export async function overview() {
   const traps = new Map<string, number>();
   let boxes = 0;
   for (const item of annotations) {
-    boxes += item.boxes.length;
-    const trap = String(item.source?.metadata?.trap_code || 'Sem armadilha');
+    boxes += item.boxes;
+    const trap = item.trap || 'Sem armadilha';
     traps.set(trap, (traps.get(trap) || 0) + 1);
   }
   const thresholdRows = await readCsv(
@@ -283,8 +294,41 @@ export async function overview() {
   };
 }
 
-export function resolveAnnotationImage(annotation: Annotation) {
+export async function resolveAnnotationImage(annotation: Annotation) {
+  const source = await sourceImage(annotation.key);
+  if (source) return imageFor(source);
   return path.join(farmPaths.annotationRoot, 'images', annotation.image);
+}
+
+export async function annotationSummaries() {
+  const [originals, sources, draftNames] = await Promise.all([
+    listAnnotations(), sourceImages(), files(path.join(config.dataRoot, 'annotation-drafts')),
+  ]);
+  const originalsByKey = new Map(originals.map((item) => [item.key, item]));
+  const drafts = new Map<string, Annotation>();
+  for (const name of draftNames.filter((item) => item.endsWith('.json'))) {
+    try { drafts.set(name.slice(0, -5), JSON.parse(await fs.readFile(path.join(config.dataRoot, 'annotation-drafts', name), 'utf8'))); }
+    catch { /* Ignore a damaged draft, keeping the source record available. */ }
+  }
+  const byKey = new Map(sources.map((item) => [item.key, item]));
+  const entries = [...sources, ...originals.filter((item) => !byKey.has(item.key)).map((item) => ({
+    key: item.key, image: item.image, metadata: item.source?.metadata || {}, url: item.source?.url || '',
+  }))];
+  const summaries = entries.map((source) => {
+    const item = drafts.get(source.key) || originalsByKey.get(source.key);
+    return {
+      key: source.key, image: source.image, reviewed: item?.reviewed || false,
+      excluded: item?.excluded || false, boxes: item?.boxes.length || 0,
+      width: item?.width || 0, height: item?.height || 0,
+      trap: String(source.metadata?.trap_code || item?.source?.metadata?.trap_code || '') || null,
+      createdAt: String(source.metadata?.created_at || item?.source?.metadata?.created_at || '') || null,
+      cached: Boolean(item),
+    };
+  });
+  return summaries.sort((a, b) => {
+    const priority = (item: typeof a) => item.excluded ? 3 : item.reviewed ? 2 : item.trap?.toUpperCase().startsWith('FARMLAB') ? 0 : 1;
+    return priority(a) - priority(b);
+  });
 }
 
 export function resolvePredictionImage(group: string, file: string) {

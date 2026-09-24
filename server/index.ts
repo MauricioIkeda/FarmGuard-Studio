@@ -6,13 +6,14 @@ import { createServer as createViteServer } from 'vite';
 import { config, studioRoot } from './config.js';
 import {
   getAnnotation,
-  listAnnotations,
+  annotationSummaries,
   overview,
   predictionFiles,
   resolveAnnotationImage,
   resolvePredictionImage,
   saveDraft,
 } from './farmguard.js';
+import { importSource } from './annotation-source.js';
 import {
   cancelJob,
   createJob,
@@ -63,23 +64,15 @@ app.get('/api/overview', async (_request, response, next) => {
 
 app.get('/api/annotations', async (_request, response, next) => {
   try {
-    const annotations = await listAnnotations();
-    response.json(
-      annotations.map((item) => ({
-        key: item.key,
-        image: item.image,
-        reviewed: item.reviewed,
-        excluded: item.excluded,
-        boxes: item.boxes.length,
-        width: item.width,
-        height: item.height,
-        trap: item.source?.metadata?.trap_code || null,
-        createdAt: item.source?.metadata?.created_at || null,
-      })),
-    );
+    response.json(await annotationSummaries());
   } catch (error) {
     next(error);
   }
+});
+
+app.post('/api/sources/parquet', express.raw({ type: 'application/octet-stream', limit: '15mb' }), async (request, response, next) => {
+  try { response.json(await importSource(request.body as Buffer)); }
+  catch (error) { next(error); }
 });
 
 app.get('/api/annotations/:key', async (request, response, next) => {
@@ -104,7 +97,7 @@ app.get('/api/annotations/:key/image', async (request, response, next) => {
   try {
     const annotation = await getAnnotation(request.params.key);
     if (!annotation) return response.status(404).end();
-    response.sendFile(resolveAnnotationImage(annotation));
+    response.sendFile(await resolveAnnotationImage(annotation));
   } catch (error) {
     next(error);
   }

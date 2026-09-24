@@ -153,6 +153,17 @@ td strong { color: var(--text); }
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; background: #020403d9; backdrop-filter: blur(10px); display: grid; place-items: center; padding: 28px; }
 .gallery-modal { width: min(1300px, 100%); max-height: 90vh; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; box-shadow: 0 30px 100px #000; }
 .gallery-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.gallery-image-button { min-width: 0; padding: 0; text-align: left; background: #060a08; border: 1px solid var(--line-soft); border-radius: 9px; overflow: hidden; cursor: zoom-in; }
+.gallery-image-button:hover { border-color: var(--mint); }
+.gallery-image-button img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: contain; }
+.gallery-image-button span { display: block; font-size: 10px; color: var(--muted); padding: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prediction-viewer { position: fixed; inset: 0; z-index: 70; background: #020403; display: flex; flex-direction: column; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+.prediction-viewer-toolbar { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px; }
+.prediction-viewer-toolbar strong { min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prediction-viewer-toolbar > div { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.prediction-viewer-toolbar span { min-width: 42px; text-align: center; color: var(--muted); font-size: 11px; }
+.prediction-viewer-image { flex: 1; min-height: 0; overflow: auto; text-align: center; touch-action: pan-x pan-y; cursor: grab; }
+.prediction-viewer-image img { display: block; max-width: none; height: auto; margin: 0 auto; user-select: none; -webkit-user-drag: none; }
 .gallery-grid figure { margin: 0; background: #060a08; border: 1px solid var(--line-soft); border-radius: 9px; overflow: hidden; }
 .gallery-grid img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: contain; }
 .gallery-grid figcaption { font-size: 10px; color: var(--muted); padding: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -232,17 +243,23 @@ td strong { color: var(--text); }
 .install-hint { margin: 18px 0 0; padding: 11px 13px; border: 1px solid #b9f35a38; border-radius: 9px; background: #b9f35a0a; color: #c9dfcf; font-size: 12px; line-height: 1.5; }
 
 .annotator-actions { display: flex; gap: 8px; }
+.file-upload { display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
+.file-upload input { display: none; }
 .annotator-layout { display: grid; grid-template-columns: 255px minmax(0, 1fr); gap: 12px; min-height: 700px; }
 .annotation-queue { padding: 13px; margin: 0; min-height: 0; display: flex; flex-direction: column; }
 .queue-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 3px 12px; }
 .queue-head h2 { font-size: 17px; }
 .queue-toggle { display: none; min-height: 42px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--mint); padding: 0 11px; font-size: 11px; font-weight: 750; cursor: pointer; }
-.annotation-queue input { margin-bottom: 9px; font-size: 12px; height: 39px; }
+.annotation-queue input, .annotation-queue select { margin-bottom: 9px; font-size: 12px; height: 39px; }
+.annotation-queue select { width: 100%; color: var(--text); background: #080f0c; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
+.queue-prioritize { min-height: 34px; margin-bottom: 9px; border: 1px solid var(--line); border-radius: 7px; background: #0b1812; color: var(--mint); cursor: pointer; font-size: 11px; font-weight: 700; }
+.queue-prioritize:disabled { opacity: .45; cursor: not-allowed; }
 .queue-list { display: grid; gap: 5px; overflow: auto; max-height: 680px; padding-right: 3px; }
 .queue-list button { width: 100%; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 6px; text-align: left; cursor: pointer; }
 .queue-list button:hover { background: #ffffff08; }
 .queue-list button.active { background: var(--surface-3); border-color: #3b5548; }
 .queue-thumb { width: 52px; height: 44px; border-radius: 6px; background: #040705; overflow: hidden; }
+.queue-thumb:has(svg) { display: grid; place-items: center; color: var(--muted); }
 .queue-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .queue-list button > span:nth-child(2) { min-width: 0; }
 .queue-list strong, .queue-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -318,6 +335,9 @@ td strong { color: var(--text); }
   .operation-types { grid-template-columns: repeat(2, 1fr); }
   .annotation-toolbar { align-items: flex-start; }
   .annotation-toolbar > div:first-child { display: grid; gap: 4px; }
+  .annotation-toolbar > div:last-child { display: grid; grid-template-columns: repeat(2, 40px); gap: 2px; }
+  .annotator-actions { flex-wrap: wrap; }
+  .annotator-actions .file-upload { min-height: 42px; flex: 1 1 100%; }
   .annotation-bottom { flex-wrap: wrap; }
   .annotation-bottom .primary-button { flex: 1; }
   .gallery-grid { grid-template-columns: 1fr; }
@@ -329,7 +349,7 @@ td strong { color: var(--text); }
   .queue-list { max-height: 110px; }
   .queue-toggle { display: block; }
   .annotation-queue.compact { max-height: none; }
-  .annotation-queue.compact > input, .annotation-queue.compact .queue-list { display: none; }
+  .annotation-queue.compact > input, .annotation-queue.compact > select, .annotation-queue.compact .queue-prioritize, .annotation-queue.compact .queue-list { display: none; }
   .login-page { padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   .login-input input { font-size: 16px; }
 }

@@ -21,6 +21,14 @@ export const api = {
   logout: () => request<AuthStatus>('/api/auth/logout', { method: 'POST' }),
   overview: () => request<Overview>('/api/overview'),
   annotations: () => request<AnnotationSummary[]>('/api/annotations'),
+  uploadParquet: async (file: File) => {
+    const response = await fetch('/api/sources/parquet', {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Falha HTTP ${response.status}`);
+    return body as { count: number };
+  },
   annotation: (key: string) => request<Annotation>(`/api/annotations/${key}`),
   saveAnnotation: (annotation: Annotation) =>
     request<Annotation>(`/api/annotations/${annotation.key}`, {

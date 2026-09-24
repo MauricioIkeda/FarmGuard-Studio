@@ -69,6 +69,7 @@ export type AnnotationSummary = {
   height: number;
   trap: string | null;
   createdAt: string | null;
+  cached: boolean;
 };
 
 export type Box = { x: number; y: number; width: number; height: number };

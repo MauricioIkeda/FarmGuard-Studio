@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Bug,
@@ -17,7 +17,9 @@ import {
   LoaderCircle,
   Maximize2,
   Menu,
+  Minus,
   Play,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -26,6 +28,8 @@ import {
   Square,
   TerminalSquare,
   Trash2,
+  Undo2,
+  Redo2,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -92,7 +96,7 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'annotator' ? 'active' : ''} onClick={() => navigate('annotator')}><Maximize2 />Anotador</button>
         </nav>
         <div className="sidebar-foot">
-          <div className="connection"><i className={overview?.connected ? 'online' : ''} /><div><strong>{overview?.connected ? 'FarmGuard conectado' : 'Sem conexão'}</strong><span>somente leitura</span></div></div>
+          <div className="connection"><i className={overview?.connected ? 'online' : ''} /><div><strong>{overview?.connected ? 'FarmGuard conectado' : 'Sem conexão'}</strong><span>código-fonte preservado</span></div></div>
           <div className="root-path" title={overview?.farmGuardRoot}>{overview?.farmGuardRoot || 'Localizando projeto…'}</div>
         </div>
       </aside>
@@ -165,6 +169,7 @@ function ExperimentsPage({ data }: { data: Overview }) {
   const [metric, setMetric] = useState<keyof Run['metrics']>('map50');
   const [gallery, setGallery] = useState<string | null>(null);
   const [galleryFiles, setGalleryFiles] = useState<string[]>([]);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
   const compared = selected.map((name) => data.runs.find((run) => run.name === name)).filter(Boolean) as Run[];
   const toggle = (name: string) => setSelected((current) => current.includes(name) ? current.filter((item) => item !== name) : current.length < 4 ? [...current, name] : [...current.slice(1), name]);
   const openGallery = async (name: string) => { setGallery(name); setGalleryFiles(await api.predictionFiles(name)); };
@@ -196,15 +201,53 @@ function ExperimentsPage({ data }: { data: Overview }) {
         <div className="prediction-preview">{prediction.preview ? <img src={`/api/predictions/${encodeURIComponent(prediction.name)}/${encodeURIComponent(prediction.preview)}`} alt="" /> : <ImageIcon />}</div><div><strong>{prediction.name}</strong><span>{prediction.count} imagens · {date(prediction.modifiedAt)}</span></div><ChevronRight />
       </button>)}</div>
     </section>
-    {gallery && <div className="modal-backdrop" onMouseDown={() => setGallery(null)}><div className="gallery-modal" onMouseDown={(event) => event.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">Predições</span><h2>{gallery}</h2></div><button className="icon-button" onClick={() => setGallery(null)}><X /></button></div><div className="gallery-grid">{galleryFiles.map((file) => <figure key={file}><img src={`/api/predictions/${encodeURIComponent(gallery)}/${encodeURIComponent(file)}`} alt={file} loading="lazy" /><figcaption>{file}</figcaption></figure>)}</div></div></div>}
+    {gallery && <div className="modal-backdrop" onMouseDown={() => setGallery(null)}><div className="gallery-modal" onMouseDown={(event) => event.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">Predições</span><h2>{gallery}</h2></div><button className="icon-button" onClick={() => setGallery(null)} aria-label="Fechar galeria"><X /></button></div><div className="gallery-grid">{galleryFiles.map((file) => <button className="gallery-image-button" key={file} onClick={() => setActiveFile(file)}><img src={`/api/predictions/${encodeURIComponent(gallery)}/${encodeURIComponent(file)}`} alt={file} loading="lazy" /><span>{file}</span></button>)}</div></div></div>}
+    {gallery && activeFile && <PredictionViewer group={gallery} file={activeFile} onClose={() => setActiveFile(null)} />}
   </>;
+}
+
+function PredictionViewer({ group, file, onClose }: { group: string; file: string; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1);
+  const [fitWidth, setFitWidth] = useState(0);
+  const viewport = useRef<HTMLDivElement>(null);
+  const image = useRef<HTMLImageElement>(null);
+  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault(); event.stopPropagation();
+      setZoom((value) => Math.max(1, Math.min(6, value * Math.exp(-event.deltaY * 0.001))));
+    };
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    element.addEventListener('wheel', wheel, { passive: false });
+    window.addEventListener('keydown', key);
+    return () => { element.removeEventListener('wheel', wheel); window.removeEventListener('keydown', key); };
+  }, [onClose]);
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    const fit = () => {
+      const img = image.current;
+      if (!img?.naturalWidth || !img.naturalHeight) return;
+      setFitWidth(Math.min(element.clientWidth / img.naturalWidth, element.clientHeight / img.naturalHeight) * img.naturalWidth);
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    fit();
+    return () => observer.disconnect();
+  }, []);
+  return <div className="prediction-viewer" role="dialog" aria-modal="true" aria-label={`Predição ${file}`}>
+    <div className="prediction-viewer-toolbar"><strong>{file}</strong><div><button className="icon-button" aria-label="Diminuir zoom" onClick={() => setZoom((value) => Math.max(1, value / 1.4))}><Minus /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="Aumentar zoom" onClick={() => setZoom((value) => Math.min(6, value * 1.4))}><Plus /></button><button className="icon-button" aria-label="Fechar imagem" onClick={onClose}><X /></button></div></div>
+    <div className="prediction-viewer-image" ref={viewport} onPointerDown={(event) => { if (event.pointerType !== 'mouse') return; event.currentTarget.setPointerCapture(event.pointerId); drag.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; }} onPointerMove={(event) => { if (!drag.current) return; event.currentTarget.scrollLeft = drag.current.left - (event.clientX - drag.current.x); event.currentTarget.scrollTop = drag.current.top - (event.clientY - drag.current.y); }} onPointerUp={() => { drag.current = null; }}><img ref={image} onLoad={() => { const element = viewport.current; const img = image.current; if (element && img) setFitWidth(Math.min(element.clientWidth / img.naturalWidth, element.clientHeight / img.naturalHeight) * img.naturalWidth); }} src={`/api/predictions/${encodeURIComponent(group)}/${encodeURIComponent(file)}`} alt={`Predição ${file}`} style={{ width: fitWidth ? `${fitWidth * zoom}px` : 'auto' }} /></div>
+  </div>;
 }
 
 function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => Promise<void> }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [type, setType] = useState<Job['type']>('validate');
   const [model, setModel] = useState(data.models[0]?.path || '');
-  const [name, setName] = useState('studio-experiment');
+  const [name, setName] = useState('');
   const [message, setMessage] = useState('');
   const loadJobs = useCallback(async () => setJobs(await api.jobs()), []);
   useEffect(() => {
@@ -237,7 +280,8 @@ function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => 
         ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
         {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">Pesos / checkpoint</label>
         <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
-        {(type === 'train' || type === 'predict') && <><label htmlFor="name">Nome da execução</label><input id="name" value={name} onChange={(event) => setName(event.target.value)} /></>}
+        {(type === 'train' || type === 'predict') && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} onChange={(event) => setName(event.target.value)} /></>}
+        {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para o conjunto de <strong>validação YOLO atual</strong>. O lote aparecerá em Experimentos → Galerias de predição.</span></div>}
         <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
         {message && <div className="inline-error"><CircleAlert />{message}</div>}
         <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled}><Play />{data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
@@ -300,65 +344,151 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   const [annotation, setAnnotation] = useState<Annotation | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [history, setHistory] = useState<Annotation['boxes'][]>([]);
+  const [future, setFuture] = useState<Annotation['boxes'][]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('');
+  const [status, setStatus] = useState<'all' | 'pending' | 'reviewed' | 'excluded'>('pending');
   const [message, setMessage] = useState('');
   const [queueExpanded, setQueueExpanded] = useState(() => !window.matchMedia('(max-width: 570px)').matches);
-  const visible = useMemo(() => list.filter((item) => !filter || item.trap?.toLowerCase().includes(filter.toLowerCase()) || item.image.includes(filter)), [list, filter]);
+  const visible = useMemo(() => list.filter((item) => {
+    const matchesStatus = status === 'all' || (status === 'pending' ? !item.reviewed && !item.excluded : status === 'reviewed' ? item.reviewed && !item.excluded : item.excluded);
+    const query = filter.toLocaleLowerCase();
+    return matchesStatus && (!query || item.trap?.toLocaleLowerCase().includes(query) || item.image.toLocaleLowerCase().includes(query));
+  }), [list, filter, status]);
   useEffect(() => { api.annotations().then(setList).catch((error) => setMessage(error.message)); }, []);
   useEffect(() => {
     const item = visible[index];
-    if (!item) return;
-    api.annotation(item.key).then((value) => { setAnnotation(value); setHistory([]); setSelected(null); setDirty(false); }).catch((error) => setMessage(error.message));
+    if (!item) { setAnnotation(null); return; }
+    let active = true;
+    setAnnotation(null);
+    api.annotation(item.key).then((value) => {
+      if (!active) return;
+      setAnnotation(value); setHistory([]); setFuture([]); setSelected(null); setDirty(false); setMessage('');
+    }).catch((error) => { if (active) setMessage(error.message); });
+    return () => { active = false; };
   }, [visible, index]);
-  useEffect(() => { setIndex(0); }, [filter]);
+  const persist = async (reviewed: boolean) => {
+    if (!annotation || saving) return false;
+    setSaving(true); setMessage('');
+    try {
+      const saved = await api.saveAnnotation({ ...annotation, reviewed });
+      setAnnotation(saved); setDirty(false);
+      setList((items) => items.map((item) => item.key === saved.key ? {
+        ...item, reviewed: saved.reviewed, excluded: saved.excluded, boxes: saved.boxes.length, cached: true,
+      } : item));
+      await onSaved();
+      return true;
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Falha ao salvar.');
+      return false;
+    } finally { setSaving(false); }
+  };
+  const goTo = async (next: number) => {
+    if (next < 0 || next >= visible.length || next === index) return;
+    if (dirty && !(await persist(annotation?.reviewed || false))) return;
+    setIndex(next);
+    if (window.matchMedia('(max-width: 570px)').matches) setQueueExpanded(false);
+  };
+  const changeStatus = async (next: typeof status) => {
+    if (dirty && !(await persist(annotation?.reviewed || false))) return;
+    setStatus(next); setIndex(0);
+  };
+  const changeFilter = async (next: string) => {
+    if (dirty && !(await persist(annotation?.reviewed || false))) return;
+    setFilter(next); setIndex(0);
+  };
+  const prioritizeTrap = async () => {
+    const current = visible[index];
+    if (!current?.trap) return;
+    if (dirty && !(await persist(annotation?.reviewed || false))) return;
+    setList((items) => {
+      const currentIndex = items.findIndex((item) => item.key === current.key);
+      const head = items.slice(0, currentIndex + 1);
+      const tail = items.slice(currentIndex + 1);
+      const sameTrap = tail.filter((item) => !item.reviewed && !item.excluded && item.trap?.toUpperCase() === current.trap?.toUpperCase());
+      const keys = new Set(sameTrap.map((item) => item.key));
+      return [...head, ...sameTrap, ...tail.filter((item) => !keys.has(item.key))];
+    });
+  };
+  const historyPoint = () => {
+    if (!annotation) return;
+    setHistory((items) => [...items.slice(-39), annotation.boxes.map((box) => ({ ...box }))]);
+    setFuture([]);
+  };
+  const undo = () => {
+    if (!annotation || !history.length) return;
+    setFuture((items) => [...items, annotation.boxes.map((box) => ({ ...box }))]);
+    setAnnotation({ ...annotation, boxes: history.at(-1)! });
+    setHistory((items) => items.slice(0, -1)); setDirty(true); setSelected(null);
+  };
+  const redo = () => {
+    if (!annotation || !future.length) return;
+    setHistory((items) => [...items, annotation.boxes.map((box) => ({ ...box }))]);
+    setAnnotation({ ...annotation, boxes: future.at(-1)! });
+    setFuture((items) => items.slice(0, -1)); setDirty(true); setSelected(null);
+  };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (!annotation) return;
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        const previous = history.at(-1);
-        if (previous) { setAnnotation({ ...annotation, boxes: previous }); setHistory((items) => items.slice(0, -1)); setDirty(true); }
+        if (event.shiftKey) redo(); else undo();
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null && !(event.target instanceof HTMLInputElement)) {
-        setHistory((items) => [...items, annotation.boxes]);
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null && !typing) {
+        historyPoint();
         setAnnotation({ ...annotation, boxes: annotation.boxes.filter((_, boxIndex) => boxIndex !== selected) });
         setSelected(null); setDirty(true);
       }
-      if (event.key === 'Enter' && !(event.target instanceof HTMLInputElement)) void save(true);
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void persist(annotation.reviewed); }
+      if (!typing && event.key === 'ArrowLeft') void goTo(index - 1);
+      if (!typing && event.key === 'ArrowRight') void goTo(index + 1);
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   });
   const updateBoxes = (boxes: Annotation['boxes']) => { if (annotation) { setAnnotation({ ...annotation, boxes }); setDirty(true); } };
-  const historyPoint = () => { if (annotation) setHistory((items) => [...items.slice(-39), annotation.boxes.map((box) => ({ ...box }))]); };
-  const save = async (advance = false) => {
+  const finish = async () => {
     if (!annotation) return;
-    setSaving(true); setMessage('');
-    try {
-      const saved = await api.saveAnnotation({ ...annotation, reviewed: true });
-      setAnnotation(saved); setDirty(false); await onSaved();
-      if (advance && index < visible.length - 1) setIndex((current) => current + 1);
-    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao salvar.'); }
-    finally { setSaving(false); }
+    const nextKey = [...visible.slice(index + 1), ...visible.slice(0, index)]
+      .find((item) => item.key !== annotation.key && !item.reviewed && !item.excluded)?.key;
+    if (!(await persist(true))) return;
+    if (nextKey) {
+      const nextIndex = visible.findIndex((item) => item.key === nextKey);
+      if (status === 'pending') setIndex(0);
+      else if (nextIndex >= 0) setIndex(nextIndex);
+    } else setMessage('Revisão concluída: não há mais imagens pendentes nesta fila.');
   };
   const exclude = () => { if (annotation) { setAnnotation({ ...annotation, excluded: !annotation.excluded }); setDirty(true); } };
+  const uploadParquet = async (file?: File) => {
+    if (!file) return;
+    if (dirty && !(await persist(annotation?.reviewed || false))) return;
+    try {
+      const result = await api.uploadParquet(file);
+      setList(await api.annotations()); setIndex(0);
+      setMessage(`Fonte atualizada: ${result.count} imagens únicas.`);
+      await onSaved();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao importar Parquet.'); }
+  };
   return <>
-    <PageTitle eyebrow="Anotação integrada" title="Revise no mesmo lugar em que você avalia" description="As alterações ficam em rascunhos do Studio; os JSONs originais do FarmGuard permanecem intocados." action={<div className="annotator-actions"><button className="secondary-button" onClick={exclude} disabled={!annotation}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void save(false)} disabled={!annotation || saving}><Save />{saving ? 'Salvando…' : dirty ? 'Salvar rascunho' : 'Rascunho salvo'}</button></div>} />
+    <PageTitle eyebrow="Anotação integrada" title="Fila de revisão" description="Pendentes primeiro, com prioridade para as armadilhas FARMLAB. As edições ficam em rascunhos do Studio até a publicação controlada." action={<div className="annotator-actions"><label className="secondary-button file-upload"><UploadCloud />Atualizar Parquet<input type="file" accept=".parquet" onChange={(event) => { void uploadParquet(event.target.files?.[0]); event.target.value = ''; }} /></label><button className="secondary-button" onClick={exclude} disabled={!annotation}><Trash2 />{annotation?.excluded ? 'Restaurar' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void persist(annotation?.reviewed || false)} disabled={!annotation || saving || !dirty}><Save />{saving ? 'Salvando…' : 'Salvar rascunho'}</button></div>} />
     {message && <div className="error-banner"><CircleAlert />{message}</div>}
     <section className="annotator-layout">
       <aside className={`annotation-queue panel ${queueExpanded ? '' : 'compact'}`}>
         <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens · {index + 1} / {visible.length}</h2></div><button type="button" className="queue-toggle" aria-expanded={queueExpanded} onClick={() => setQueueExpanded((open) => !open)}>{queueExpanded ? 'Ocultar fila' : 'Escolher imagem'}</button></div>
-        <input placeholder="Filtrar armadilha ou arquivo" value={filter} onChange={(event) => setFilter(event.target.value)} />
-        <div className="queue-list">{visible.map((item, itemIndex) => <button key={item.key} className={itemIndex === index ? 'active' : ''} onClick={() => setIndex(itemIndex)}><span className="queue-thumb"><img src={`/api/annotations/${item.key}/image`} loading="lazy" alt="" /></span><span><strong>{item.trap || 'Sem armadilha'}</strong><small>{item.boxes} boxes · {item.reviewed ? 'revisada' : 'pendente'}</small></span>{item.excluded && <Trash2 size={14} />}</button>)}</div>
+        <select aria-label="Estado das imagens" value={status} onChange={(event) => void changeStatus(event.target.value as typeof status)}><option value="pending">Pendentes</option><option value="reviewed">Revisadas</option><option value="excluded">Excluídas</option><option value="all">Todas</option></select>
+        <input placeholder="Filtrar armadilha ou arquivo" value={filter} onChange={(event) => void changeFilter(event.target.value)} />
+        <button className="queue-prioritize" type="button" disabled={!visible[index]?.trap} onClick={() => void prioritizeTrap()}>Priorizar esta armadilha</button>
+        <div className="queue-list">{visible.map((item, itemIndex) => <button key={item.key} className={itemIndex === index ? 'active' : ''} onClick={() => void goTo(itemIndex)}><span className="queue-thumb">{item.cached ? <img src={`/api/annotations/${item.key}/image`} loading="lazy" alt="" /> : <ImageIcon size={20} />}</span><span><strong>{item.trap || 'Sem armadilha'}</strong><small>{item.boxes} boxes · {item.excluded ? 'excluída' : item.reviewed ? 'revisada' : 'pendente'}</small></span></button>)}</div>
       </aside>
       <div className="annotation-workspace">
         {annotation ? <>
-          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : 'Original · somente leitura'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes</span></div><div><button className="icon-button" disabled={index === 0} onClick={() => setIndex((value) => value - 1)}><ChevronLeft /></button><button className="icon-button" disabled={index >= visible.length - 1} onClick={() => setIndex((value) => value + 1)}><ChevronRight /></button></div></div>
+          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
           <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} selected={selected} onSelected={setSelected} onChange={updateBoxes} onHistoryPoint={historyPoint} />
-          <div className="annotation-bottom"><div><span>Box selecionada</span><strong>{selected === null ? 'Nenhuma' : `#${selected + 1}`}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}<button className="primary-button" onClick={() => void save(true)}><Check />Concluir + próxima</button></div>
-        </> : <div className="loading-page"><LoaderCircle className="spin" />Carregando imagem…</div>}
+          <div className="annotation-bottom"><div><span>Box selecionada</span><strong>{selected === null ? 'Nenhuma' : `#${selected + 1}`}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
+        </> : <div className="loading-page">{visible.length ? <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
       </div>
     </section>
   </>;

@@ -37,9 +37,10 @@ export function AnnotationCanvas({
   const [view, setView] = useState({ scale: 0.25, x: 20, y: 20 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
-  const [mode, setMode] = useState<'draw' | 'pan'>('draw');
+  const [mode, setMode] = useState<'draw' | 'pan'>(() => window.matchMedia('(pointer: coarse)').matches ? 'pan' : 'draw');
   const pointers = useRef(new Map<number, Point>());
   const pinch = useRef<{ distance: number; scale: number; anchor: Point } | null>(null);
+  const gestureEdited = useRef(false);
 
   const screenToImage = (point: Point) => ({
     x: (point.x - view.x) / view.scale,
@@ -146,6 +147,23 @@ export function AnnotationCanvas({
     });
   };
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = canvas.getBoundingClientRect();
+      const cursor = {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height,
+      };
+      zoom(Math.exp(-event.deltaY * 0.001), cursor);
+    };
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [canvasSize]);
+
   const hitIndex = (imagePoint: Point) => {
     for (let index = boxes.length - 1; index >= 0; index -= 1) {
       const box = boxes[index];
@@ -166,9 +184,11 @@ export function AnnotationCanvas({
       const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
       pinch.current = { distance: Math.hypot(first.x - second.x, first.y - second.y), scale: view.scale, anchor: screenToImage(midpoint) };
       setGesture(null);
+      gestureEdited.current = false;
       return;
     }
     if (pointers.current.size > 1) return;
+    gestureEdited.current = false;
     const image = screenToImage(screen);
     if (mode === 'pan' || event.button === 1 || event.button === 2 || spaceDown) {
       setGesture({ type: 'pan', start: screen, originX: view.x, originY: view.y });
@@ -177,14 +197,12 @@ export function AnnotationCanvas({
     const hit = hitIndex(image);
     if (hit !== null) {
       onSelected(hit);
-      onHistoryPoint();
       const box = boxes[hit];
       const handle = Math.hypot(image.x - (box.x + box.width), image.y - (box.y + box.height)) < (event.pointerType === 'touch' ? 34 : 22) / view.scale;
       setGesture({ type: handle ? 'resize' : 'move', start: image, original: { ...box }, index: hit });
       return;
     }
     onSelected(null);
-    onHistoryPoint();
     setGesture({ type: 'draw', start: image, current: image });
   };
 
@@ -212,6 +230,7 @@ export function AnnotationCanvas({
     const dx = image.x - gesture.start.x;
     const dy = image.y - gesture.start.y;
     const updated = [...boxes];
+    if (!gestureEdited.current) { onHistoryPoint(); gestureEdited.current = true; }
     if (gesture.type === 'move') {
       updated[gesture.index] = {
         ...gesture.original,
@@ -241,16 +260,12 @@ export function AnnotationCanvas({
       const width = Math.min(imageWidth - x, Math.abs(gesture.current.x - gesture.start.x));
       const height = Math.min(imageHeight - y, Math.abs(gesture.current.y - gesture.start.y));
       if (width >= 4 && height >= 4) {
+        onHistoryPoint();
         onChange([...boxes, { x, y, width, height }]);
         onSelected(boxes.length);
       }
     }
     setGesture(null);
-  };
-
-  const wheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    zoom(Math.exp(-event.deltaY * 0.001), point(event));
   };
 
   return (
@@ -277,10 +292,9 @@ export function AnnotationCanvas({
         onPointerMove={pointerMove}
         onPointerUp={pointerUp}
         onPointerCancel={(event) => { pointers.current.delete(event.pointerId); pinch.current = null; setGesture(null); }}
-        onWheel={wheel}
       />
       </div>
-      <div className="canvas-instructions">Um dedo marca ou move conforme a ferramenta. Dois dedos aproximam e arrastam.</div>
+      <div className="canvas-instructions">No celular, Mover evita boxes acidentais. Toque em Marcar para desenhar com um dedo; dois dedos aproximam e arrastam.</div>
     </div>
   );
 }
