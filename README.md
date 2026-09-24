@@ -72,7 +72,7 @@ Para um tunnel nomeado, salve a credencial recebida da Cloudflare em `data/secre
 .\scripts\start-cloudflare.ps1
 ```
 
-Na instalação local, a credencial fica em `data/secrets/cloudflare.token`, ignorado pelo Git. Para iniciar o servidor e o tunnel em segundo plano, execute `scripts/start-background.ps1` após `npm run build`. O atalho de inicialização do Windows executa esse script ao entrar na conta do usuário.
+Na instalação local, a credencial fica em `data/secrets/cloudflare.token`, ignorado pelo Git. Para iniciar o servidor e o tunnel em segundo plano, execute `scripts/start-background.ps1` após `npm run build`. No Windows, `scripts/manage-studio.ps1` aceita `-Action Start`, `Restart`, `Stop` ou `Status`; o lançador **FarmGuard Studio.cmd** na Área de Trabalho oferece essas opções em um menu. Ele é manual: não configura inicialização automática junto com o PC.
 
 No iPhone, abra `https://farmguard.dominiofoda.com.br` no Safari, toque em Compartilhar e em **Adicionar à Tela de Início**. O Studio abre em modo de aplicativo. A tela offline informa quando o computador principal ou a internet estiver indisponível; dados e comandos nunca são armazenados no cache do navegador.
 
