@@ -221,6 +221,9 @@ td strong { color: var(--text); }
 .publication-list strong, .publication-list small { display: block; }
 .publication-list strong { font-size: 12px; }
 .publication-list small { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.publication-rebuild-option { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; cursor: pointer; color: var(--text); font-size: 12px; }
+.publication-rebuild-option input { accent-color: var(--lime); width: 16px; height: 16px; flex: 0 0 auto; margin: 1px 0 0; }
+.publication-rebuild-option small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .mini-loading { color: var(--muted); min-height: 100px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; }
 
 .login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; position: relative; overflow: hidden; }

@@ -331,6 +331,7 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
+  const [rebuildAfterPublish, setRebuildAfterPublish] = useState(false);
   const [message, setMessage] = useState('');
   const [publicationWarning, setPublicationWarning] = useState(false);
   const refresh = useCallback(async () => {
@@ -347,12 +348,12 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
   const publish = async () => {
     setPublishing(true); setMessage(''); setPublicationWarning(false);
     try {
-      const result = await api.publishDrafts(selected, true);
+      const result = await api.publishDrafts(selected, rebuildAfterPublish);
       const backup = result.driveErrors.length
         ? `Backup no Drive incompleto (${result.driveBackedUp}/${result.published.length}); confira a conexão e use “Fazer backup agora”.`
         : `Backup das anotações e imagens confirmado no Drive (${result.driveBackedUp}/${result.published.length}).`;
       setPublicationWarning(Boolean(result.driveErrors.length));
-      setMessage(`${result.published.length} anotação(ões) publicadas, ${result.imagesAdded.length} imagem(ns) adicionadas ao FarmGuard. Reconstrução YOLO ${result.job ? 'iniciada' : 'não iniciada'}. ${backup}`);
+      setMessage(`${result.published.length} anotação(ões) publicadas, ${result.imagesAdded.length} imagem(ns) adicionadas ao FarmGuard. ${result.job ? 'Reconstrução YOLO iniciada.' : 'Dataset YOLO mantido como está; você pode reconstruí-lo depois em Operações → Gerar YOLO.'} ${backup}`);
       await refresh(); await onUpdated();
     } catch (cause) { setPublicationWarning(true); setMessage(cause instanceof Error ? cause.message : 'Falha na publicação.'); }
     finally { setPublishing(false); }
@@ -365,10 +366,11 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
       <div className="drive-actions"><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive-pull', {}).then(onUpdated)}><Cloud />Importar novos arquivos</button><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive', {}).then(onUpdated)}><UploadCloud />Fazer backup agora</button></div>
     </article>
     <article className="panel publication-card">
-      <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard → YOLO</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
+      <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
       {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => <label key={item.key}><input type="checkbox" checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><span><strong>{item.trap || item.image}</strong><small>{item.boxesBefore} → {item.boxesAfter} boxes{item.excludedBefore !== item.excludedAfter ? ` · ${item.excludedAfter ? 'excluir' : 'restaurar'}` : ''}</small></span></label>)}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
       {message && <div className={publicationWarning ? 'inline-error' : 'inline-success'}>{message}</div>}
-      <button className="primary-button full" disabled={!selected.length || publishing} onClick={() => void publish()}><UploadCloud />{publishing ? 'Publicando…' : 'Publicar e reconstruir DatasetYolo'}</button>
+      <label className="publication-rebuild-option"><input type="checkbox" checked={rebuildAfterPublish} onChange={(event) => setRebuildAfterPublish(event.target.checked)} disabled={publishing} /><span>Reconstruir DatasetYolo logo após publicar<small>Desmarcado: publica e faz backup sem alterar o dataset YOLO. Você pode gerar o YOLO mais tarde em Operações.</small></span></label>
+      <button className="primary-button full" disabled={!selected.length || publishing} onClick={() => void publish()}><UploadCloud />{publishing ? 'Publicando…' : rebuildAfterPublish ? 'Publicar, fazer backup e gerar YOLO' : 'Publicar e fazer backup'}</button>
     </article>
   </section>;
 }

@@ -46,7 +46,7 @@ export const api = {
   predictionFiles: (group: string) =>
     request<string[]>(`/api/predictions/${encodeURIComponent(group)}`),
   publicationPlan: () => request<PublicationChange[]>('/api/publication/plan'),
-  publishDrafts: (keys: string[], rebuild = true) =>
+  publishDrafts: (keys: string[], rebuild = false) =>
     request<{ published: string[]; imagesAdded: string[]; driveBackedUp: number; driveErrors: string[]; backupRoot: string; job: Job | null }>('/api/publication/publish', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

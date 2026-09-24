@@ -159,7 +159,7 @@ app.post('/api/publication/publish', async (request, response, next) => {
   try {
     const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String) : [];
     const publication = await publishDrafts(keys);
-    const rebuild = request.body?.rebuild !== false;
+    const rebuild = request.body?.rebuild === true;
     const job = rebuild ? await createJob('dataset', {}) : null;
     response.json({ ...publication, job });
   } catch (error) { next(error); }
