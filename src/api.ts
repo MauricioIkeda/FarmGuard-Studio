@@ -2,6 +2,9 @@ import type { Annotation, AnnotationSummary, AuthStatus, Job, Overview, Publicat
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
+  if (response.status === 401 && url !== '/api/auth/login') {
+    window.dispatchEvent(new Event('farmguard:unauthorized'));
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Falha HTTP ${response.status}`);
   return body as T;

@@ -304,6 +304,7 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('');
   const [message, setMessage] = useState('');
+  const [queueExpanded, setQueueExpanded] = useState(() => !window.matchMedia('(max-width: 570px)').matches);
   const visible = useMemo(() => list.filter((item) => !filter || item.trap?.toLowerCase().includes(filter.toLowerCase()) || item.image.includes(filter)), [list, filter]);
   useEffect(() => { api.annotations().then(setList).catch((error) => setMessage(error.message)); }, []);
   useEffect(() => {
@@ -347,8 +348,8 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
     <PageTitle eyebrow="Anotação integrada" title="Revise no mesmo lugar em que você avalia" description="As alterações ficam em rascunhos do Studio; os JSONs originais do FarmGuard permanecem intocados." action={<div className="annotator-actions"><button className="secondary-button" onClick={exclude} disabled={!annotation}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void save(false)} disabled={!annotation || saving}><Save />{saving ? 'Salvando…' : dirty ? 'Salvar rascunho' : 'Rascunho salvo'}</button></div>} />
     {message && <div className="error-banner"><CircleAlert />{message}</div>}
     <section className="annotator-layout">
-      <aside className="annotation-queue panel">
-        <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens</h2></div><StatusPill>{index + 1} / {visible.length}</StatusPill></div>
+      <aside className={`annotation-queue panel ${queueExpanded ? '' : 'compact'}`}>
+        <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens · {index + 1} / {visible.length}</h2></div><button type="button" className="queue-toggle" aria-expanded={queueExpanded} onClick={() => setQueueExpanded((open) => !open)}>{queueExpanded ? 'Ocultar fila' : 'Escolher imagem'}</button></div>
         <input placeholder="Filtrar armadilha ou arquivo" value={filter} onChange={(event) => setFilter(event.target.value)} />
         <div className="queue-list">{visible.map((item, itemIndex) => <button key={item.key} className={itemIndex === index ? 'active' : ''} onClick={() => setIndex(itemIndex)}><span className="queue-thumb"><img src={`/api/annotations/${item.key}/image`} loading="lazy" alt="" /></span><span><strong>{item.trap || 'Sem armadilha'}</strong><small>{item.boxes} boxes · {item.reviewed ? 'revisada' : 'pendente'}</small></span>{item.excluded && <Trash2 size={14} />}</button>)}</div>
       </aside>
@@ -368,6 +369,9 @@ function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const showInstallHint = /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+    !window.matchMedia('(display-mode: standalone)').matches &&
+    !('standalone' in navigator && (navigator as Navigator & { standalone?: boolean }).standalone);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setLoading(true); setError('');
     try { await api.login(username, password); onAuthenticated(); }
@@ -387,6 +391,7 @@ function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
       <div className="login-input"><LockKeyhole /><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus /></div>
       {error && <div className="inline-error"><CircleAlert />{error}</div>}
       <button className="primary-button full" disabled={loading}>{loading ? <LoaderCircle className="spin" /> : <ShieldCheck />}Entrar no Studio</button>
+      {showInstallHint && <p className="install-hint">Para usar como app no iPhone: abra no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”.</p>}
     </form>
   </main>;
 }
@@ -394,6 +399,11 @@ function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
 function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   useEffect(() => { api.authStatus().then((status) => setAuthenticated(status.authenticated)).catch(() => setAuthenticated(false)); }, []);
+  useEffect(() => {
+    const expired = () => setAuthenticated(false);
+    window.addEventListener('farmguard:unauthorized', expired);
+    return () => window.removeEventListener('farmguard:unauthorized', expired);
+  }, []);
   if (authenticated === null) return <div className="loading-page full-page"><LoaderCircle className="spin" />Verificando acesso…</div>;
   if (!authenticated) return <LoginPage onAuthenticated={() => setAuthenticated(true)} />;
   return <StudioApp onLogout={() => void api.logout().finally(() => setAuthenticated(false))} />;

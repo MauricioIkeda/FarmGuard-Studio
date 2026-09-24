@@ -16,6 +16,8 @@ O Studio é um repositório independente. Por padrão, ele acessa o FarmGuard so
 - anotador web com criação, seleção, movimento, redimensionamento e exclusão de boxes, zoom, pan e desfazer;
 - publicação controlada de rascunhos, com diff, backup local e reconstrução do YOLO;
 - autenticação por sessão, limitação de tentativas e cookies seguros para acesso remoto.
+- aplicativo instalável na Tela de Início do iPhone, com interface ajustada para toque e tela segura;
+- sessões preservadas por sete dias mesmo após reiniciar o servidor.
 
 ## Executar
 
@@ -60,12 +62,15 @@ Com o Studio em execução, o tunnel deve encaminhar o domínio escolhido para `
 cloudflared tunnel --url http://localhost:4310
 ```
 
-Para um tunnel nomeado por token:
+Para um tunnel nomeado, salve a credencial recebida da Cloudflare em `data/secrets/cloudflare.token` e execute:
 
 ```powershell
-$env:CLOUDFLARE_TUNNEL_TOKEN='token-do-tunnel'
 .\scripts\start-cloudflare.ps1
 ```
+
+Na instalação local, a credencial fica em `data/secrets/cloudflare.token`, ignorado pelo Git. Para iniciar o servidor e o tunnel em segundo plano, execute `scripts/start-background.ps1` após `npm run build`. O atalho de inicialização do Windows executa esse script ao entrar na conta do usuário.
+
+No iPhone, abra `https://farmguard.dominiofoda.com.br` no Safari, toque em Compartilhar e em **Adicionar à Tela de Início**. O Studio abre em modo de aplicativo. A tela offline informa quando o computador principal ou a internet estiver indisponível; dados e comandos nunca são armazenados no cache do navegador.
 
 O login do Studio continua obrigatório atrás do tunnel. Para uma segunda camada, configure também uma política do Cloudflare Access para o hostname.
 

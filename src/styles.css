@@ -22,7 +22,7 @@
 
 * { box-sizing: border-box; }
 html { background: var(--bg); }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 70% -15%, #153428 0, transparent 30rem), var(--bg); }
+body { margin: 0; min-width: 320px; min-height: 100dvh; background: radial-gradient(circle at 70% -15%, #153428 0, transparent 30rem), var(--bg); }
 button, input, select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
@@ -229,12 +229,14 @@ td strong { color: var(--text); }
 .login-input svg { width: 17px; color: #6f867a; }
 .login-input input { min-width: 0; flex: 1; height: 100%; color: var(--text); border: 0; outline: 0; background: transparent; }
 .full-page { min-height: 100vh; }
+.install-hint { margin: 18px 0 0; padding: 11px 13px; border: 1px solid #b9f35a38; border-radius: 9px; background: #b9f35a0a; color: #c9dfcf; font-size: 12px; line-height: 1.5; }
 
 .annotator-actions { display: flex; gap: 8px; }
 .annotator-layout { display: grid; grid-template-columns: 255px minmax(0, 1fr); gap: 12px; min-height: 700px; }
 .annotation-queue { padding: 13px; margin: 0; min-height: 0; display: flex; flex-direction: column; }
 .queue-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 3px 12px; }
 .queue-head h2 { font-size: 17px; }
+.queue-toggle { display: none; min-height: 42px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--mint); padding: 0 11px; font-size: 11px; font-weight: 750; cursor: pointer; }
 .annotation-queue input { margin-bottom: 9px; font-size: 12px; height: 39px; }
 .queue-list { display: grid; gap: 5px; overflow: auto; max-height: 680px; padding-right: 3px; }
 .queue-list button { width: 100%; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 6px; text-align: left; cursor: pointer; }
@@ -251,8 +253,13 @@ td strong { color: var(--text); }
 .annotation-toolbar > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .annotation-toolbar strong { font-size: 12px; }
 .annotation-toolbar span:not(.status-pill) { color: var(--muted); font-size: 11px; }
-.canvas-shell { position: relative; background: #030605; overflow: hidden; }
-.canvas-shell canvas { display: block; width: 100%; height: min(64vh, 820px); cursor: crosshair; touch-action: none; }
+.canvas-shell { position: relative; height: min(64vh, 820px); background: #030605; overflow: hidden; }
+.canvas-shell canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.canvas-tools { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; background: #0d1713; border-bottom: 1px solid var(--line-soft); }
+.canvas-modes, .canvas-zoom { display: flex; gap: 5px; }
+.canvas-tools button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 42px; min-height: 42px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: #09130f; color: var(--muted); font-weight: 700; cursor: pointer; }
+.canvas-tools button.active { color: var(--lime); border-color: #6f9c39; background: #b9f35a0d; }
+.canvas-instructions { padding: 8px 12px; background: #0d1713; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .canvas-fit { position: absolute; top: 12px; right: 12px; border: 1px solid #ffffff25; background: #060a08c9; backdrop-filter: blur(9px); color: #d5e2db; border-radius: 7px; padding: 7px 10px; font-size: 11px; cursor: pointer; }
 .canvas-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: #030605da; border: 1px solid #ffffff14; border-radius: 99px; padding: 7px 13px; color: #91a299; font-size: 10px; white-space: nowrap; pointer-events: none; }
 .annotation-bottom { min-height: 58px; display: flex; align-items: center; gap: 9px; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid var(--line-soft); background: #0d1713; }
@@ -283,9 +290,10 @@ td strong { color: var(--text); }
   .sidebar.open { transform: translateX(0); }
   .mobile-close { display: grid; margin-left: auto; }
   .menu-button { display: grid; }
-  .topbar { padding: 0 14px; }
+  .topbar { padding: env(safe-area-inset-top) max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); height: calc(68px + env(safe-area-inset-top)); }
+  .sidebar { padding-top: max(20px, env(safe-area-inset-top)); padding-bottom: max(20px, env(safe-area-inset-bottom)); height: 100dvh; }
   .breadcrumb { display: none; }
-  .page-wrap { padding: 26px 16px 50px; }
+  .page-wrap { padding: 26px max(16px, env(safe-area-inset-right)) max(50px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   .page-title { align-items: flex-start; flex-direction: column; }
   .page-title .primary-button { width: 100%; }
   .annotator-actions { width: 100%; }
@@ -293,7 +301,7 @@ td strong { color: var(--text); }
   .annotator-layout { grid-template-columns: 1fr; }
   .annotation-queue { max-height: 260px; }
   .queue-list { max-height: 160px; }
-  .canvas-shell canvas { height: 58vh; }
+  .canvas-shell { height: min(58dvh, 600px); }
   .canvas-hint { display: none; }
   .gallery-grid { grid-template-columns: repeat(2, 1fr); }
 }
@@ -314,4 +322,14 @@ td strong { color: var(--text); }
   .annotation-bottom .primary-button { flex: 1; }
   .gallery-grid { grid-template-columns: 1fr; }
   .modal-backdrop { padding: 10px; }
+  .canvas-tools { padding: 8px; }
+  .canvas-tools button { padding: 0 8px; }
+  .canvas-instructions { font-size: 10px; }
+  .annotation-queue { max-height: 210px; }
+  .queue-list { max-height: 110px; }
+  .queue-toggle { display: block; }
+  .annotation-queue.compact { max-height: none; }
+  .annotation-queue.compact > input, .annotation-queue.compact .queue-list { display: none; }
+  .login-page { padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .login-input input { font-size: 16px; }
 }

@@ -1,13 +1,33 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 
 type Session = { username: string; expiresAt: number };
 type Attempt = { count: number; resetAt: number };
 
-const sessions = new Map<string, Session>();
+const sessionFile = path.join(config.dataRoot, 'sessions.json');
+function readSessions() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(sessionFile, 'utf8')) as Record<string, Session>;
+    return new Map(Object.entries(saved).filter(([, session]) =>
+      typeof session?.username === 'string' && typeof session.expiresAt === 'number' && session.expiresAt > Date.now(),
+    ));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error('Não foi possível ler as sessões salvas:', error);
+    return new Map<string, Session>();
+  }
+}
+const sessions = readSessions();
+function saveSessions() {
+  fs.mkdirSync(config.dataRoot, { recursive: true });
+  const temporary = `${sessionFile}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+  fs.renameSync(temporary, sessionFile);
+}
 const attempts = new Map<string, Attempt>();
-const sessionDuration = 12 * 60 * 60 * 1000;
+const sessionDuration = 7 * 24 * 60 * 60 * 1000;
 const attemptWindow = 15 * 60 * 1000;
 const maxAttempts = 7;
 
@@ -35,7 +55,9 @@ function signature(token: string) {
 }
 
 function sessionId(request: Request) {
-  const raw = parseCookies(request.headers.cookie).farmguard_session;
+  let raw: string | undefined;
+  try { raw = parseCookies(request.headers.cookie).farmguard_session; }
+  catch { return null; }
   if (!raw) return null;
   const [token, suppliedSignature] = raw.split('.');
   if (!token || !suppliedSignature) return null;
@@ -55,7 +77,7 @@ export function currentSession(request: Request) {
   if (!id) return null;
   const session = sessions.get(id);
   if (!session || session.expiresAt <= Date.now()) {
-    if (id) sessions.delete(id);
+    if (id && sessions.delete(id)) saveSessions();
     return null;
   }
   return session;
@@ -96,6 +118,7 @@ export function login(request: Request, response: Response) {
   attempts.delete(address);
   const token = crypto.randomBytes(32).toString('base64url');
   sessions.set(token, { username, expiresAt: now + sessionDuration });
+  saveSessions();
   const secure = request.secure || request.get('x-forwarded-proto') === 'https';
   response.setHeader(
     'Set-Cookie',
@@ -106,7 +129,7 @@ export function login(request: Request, response: Response) {
 
 export function logout(request: Request, response: Response) {
   const id = sessionId(request);
-  if (id) sessions.delete(id);
+  if (id && sessions.delete(id)) saveSessions();
   response.setHeader(
     'Set-Cookie',
     'farmguard_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
