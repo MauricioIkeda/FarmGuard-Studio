@@ -25,6 +25,7 @@ import {
 import { authStatus, login, logout, requireAuth } from './auth.js';
 import { driveStatus } from './drive.js';
 import { publicationPlan, publishDrafts } from './publication.js';
+import { suggestBoxes } from './ai-suggestions.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -91,6 +92,11 @@ app.put('/api/annotations/:key', async (request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.post('/api/annotations/:key/suggest', async (request, response, next) => {
+  try { response.json(await suggestBoxes(request.params.key)); }
+  catch (error) { next(error); }
 });
 
 app.get('/api/annotations/:key/image', async (request, response, next) => {

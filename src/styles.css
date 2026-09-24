@@ -153,6 +153,7 @@ td strong { color: var(--text); }
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; background: #020403d9; backdrop-filter: blur(10px); display: grid; place-items: center; padding: 28px; }
 .confirm-modal { width: min(430px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 25px; box-shadow: 0 30px 100px #000; }
 .confirm-modal-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 11px; background: #ff6e7017; color: var(--red); }
+.confirm-modal-icon.ai { background: #b9f35a18; color: var(--lime); }
 .confirm-modal-icon svg { width: 21px; }
 .confirm-modal h2 { margin: 17px 0 8px; font-size: 19px; }
 .confirm-modal p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -257,6 +258,8 @@ td strong { color: var(--text); }
 .install-hint { margin: 18px 0 0; padding: 11px 13px; border: 1px solid #b9f35a38; border-radius: 9px; background: #b9f35a0a; color: #c9dfcf; font-size: 12px; line-height: 1.5; }
 
 .annotator-actions { display: flex; gap: 8px; }
+.ai-suggest-button { color: var(--lime); border-color: #6f9c3966; }
+.annotation-ai-notice { margin: 0 0 12px; }
 .file-upload { display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .file-upload input { display: none; }
 .annotator-layout { display: grid; grid-template-columns: 255px minmax(0, 1fr); gap: 12px; height: clamp(620px, 84vh, 1020px); align-items: stretch; }
@@ -280,7 +283,9 @@ td strong { color: var(--text); }
 .queue-list strong, .queue-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-list strong { font-size: 11px; }
 .queue-list small { color: var(--muted); font-size: 9px; margin-top: 4px; }
-.annotation-workspace { background: #070c0a; border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.annotation-workspace { position: relative; background: #070c0a; border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.annotation-ai-overlay { position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 20px; background: #030605d9; color: var(--lime); font-size: 13px; font-weight: 700; text-align: center; }
+.annotation-ai-overlay svg { width: 22px; flex: 0 0 auto; }
 .annotation-toolbar { min-height: 58px; padding: 9px 13px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line-soft); background: #0d1713; }
 .annotation-toolbar > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .annotation-toolbar strong { font-size: 12px; }

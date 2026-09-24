@@ -36,6 +36,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(annotation),
     }),
+  suggestAnnotation: (key: string) =>
+    request<{ key: string; model: string; boxes: Annotation['boxes'] }>(`/api/annotations/${encodeURIComponent(key)}/suggest`, {
+      method: 'POST',
+    }),
   jobs: () => request<Job[]>('/api/jobs'),
   createJob: (type: Job['type'], options: Record<string, unknown>) =>
     request<Job>('/api/jobs', {
