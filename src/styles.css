@@ -253,6 +253,7 @@ td strong { color: var(--text); }
 .queue-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 3px 12px; }
 .queue-head h2 { font-size: 17px; }
 .queue-toggle { display: none; min-height: 42px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--mint); padding: 0 11px; font-size: 11px; font-weight: 750; cursor: pointer; }
+.queue-filters-mobile { display: none; }
 .annotation-queue input, .annotation-queue select { margin-bottom: 9px; font-size: 12px; height: 39px; }
 .annotation-queue select { width: 100%; color: var(--text); background: #080f0c; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
 .queue-prioritize { min-height: 34px; margin-bottom: 9px; border: 1px solid var(--line); border-radius: 7px; background: #0b1812; color: var(--mint); cursor: pointer; font-size: 11px; font-weight: 700; }
@@ -349,11 +350,16 @@ td strong { color: var(--text); }
   .canvas-tools { padding: 8px; }
   .canvas-tools button { padding: 0 8px; }
   .canvas-instructions { font-size: 10px; }
-  .annotation-queue { max-height: 210px; }
-  .queue-list { max-height: 110px; }
+  .annotation-queue { max-height: none; }
+  .queue-list { flex: none; max-height: min(42dvh, 380px); }
   .queue-toggle { display: block; }
+  .queue-filters-mobile { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+  .queue-filters-mobile button { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #08110d; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
+  .queue-filters-mobile button.active { border-color: #6f9c39; background: #b9f35a0d; color: var(--lime); }
+  .queue-filters-mobile span { font-size: 10px; opacity: .8; }
+  .annotation-queue > select { display: none; }
   .annotation-queue.compact { max-height: none; }
-  .annotation-queue.compact > input, .annotation-queue.compact > select, .annotation-queue.compact .queue-prioritize, .annotation-queue.compact .queue-list { display: none; }
+  .annotation-queue.compact > input, .annotation-queue.compact .queue-prioritize, .annotation-queue.compact .queue-list { display: none; }
   .login-page { padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   .login-input input { font-size: 16px; }
 }

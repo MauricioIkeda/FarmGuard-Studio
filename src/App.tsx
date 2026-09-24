@@ -387,7 +387,13 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   const [filter, setFilter] = useState('');
   const [status, setStatus] = useState<'all' | 'pending' | 'reviewed' | 'excluded'>('pending');
   const [message, setMessage] = useState('');
-  const [queueExpanded, setQueueExpanded] = useState(() => !window.matchMedia('(max-width: 570px)').matches);
+  const [queueExpanded, setQueueExpanded] = useState(true);
+  const queueCounts = useMemo(() => ({
+    all: list.length,
+    pending: list.filter((item) => !item.reviewed && !item.excluded).length,
+    reviewed: list.filter((item) => item.reviewed && !item.excluded).length,
+    excluded: list.filter((item) => item.excluded).length,
+  }), [list]);
   const visible = useMemo(() => list.filter((item) => {
     const matchesStatus = status === 'all' || (status === 'pending' ? !item.reviewed && !item.excluded : status === 'reviewed' ? item.reviewed && !item.excluded : item.excluded);
     const query = filter.toLocaleLowerCase();
@@ -430,6 +436,7 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   const changeStatus = async (next: typeof status) => {
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
     setStatus(next); setIndex(0);
+    if (window.matchMedia('(max-width: 570px)').matches) setQueueExpanded(true);
   };
   const changeFilter = async (next: string) => {
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
@@ -515,6 +522,9 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
     <section className="annotator-layout">
       <aside className={`annotation-queue panel ${queueExpanded ? '' : 'compact'}`}>
         <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens · {index + 1} / {visible.length}</h2></div><button type="button" className="queue-toggle" aria-expanded={queueExpanded} onClick={() => setQueueExpanded((open) => !open)}>{queueExpanded ? 'Ocultar fila' : 'Escolher imagem'}</button></div>
+        <div className="queue-filters-mobile" aria-label="Filtrar imagens por estado">{([
+          ['pending', 'Pendentes'], ['reviewed', 'Revisadas'], ['excluded', 'Excluídas'], ['all', 'Todas'],
+        ] as const).map(([value, label]) => <button key={value} type="button" className={status === value ? 'active' : ''} aria-pressed={status === value} onClick={() => void changeStatus(value)}>{label}<span>{queueCounts[value]}</span></button>)}</div>
         <select aria-label="Estado das imagens" value={status} onChange={(event) => void changeStatus(event.target.value as typeof status)}><option value="pending">Pendentes</option><option value="reviewed">Revisadas</option><option value="excluded">Excluídas</option><option value="all">Todas</option></select>
         <input placeholder="Filtrar armadilha ou arquivo" value={filter} onChange={(event) => void changeFilter(event.target.value)} />
         <button className="queue-prioritize" type="button" disabled={!visible[index]?.trap} onClick={() => void prioritizeTrap()}>Priorizar esta armadilha</button>
