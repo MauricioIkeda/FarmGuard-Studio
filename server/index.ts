@@ -1,0 +1,160 @@
+import express from 'express';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createServer as createViteServer } from 'vite';
+import { config, studioRoot } from './config.js';
+import {
+  getAnnotation,
+  listAnnotations,
+  overview,
+  predictionFiles,
+  resolveAnnotationImage,
+  resolvePredictionImage,
+  saveDraft,
+} from './farmguard.js';
+import {
+  cancelJob,
+  createJob,
+  getJob,
+  jobEvents,
+  listJobs,
+  type JobType,
+} from './jobs.js';
+
+const app = express();
+app.use(express.json({ limit: '10mb' }));
+
+app.get('/api/health', (_request, response) => {
+  response.json({ ok: true, operationsEnabled: config.allowFarmGuardJobs });
+});
+
+app.get('/api/overview', async (_request, response, next) => {
+  try {
+    response.json(await overview());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/annotations', async (_request, response, next) => {
+  try {
+    const annotations = await listAnnotations();
+    response.json(
+      annotations.map((item) => ({
+        key: item.key,
+        image: item.image,
+        reviewed: item.reviewed,
+        excluded: item.excluded,
+        boxes: item.boxes.length,
+        width: item.width,
+        height: item.height,
+        trap: item.source?.metadata?.trap_code || null,
+        createdAt: item.source?.metadata?.created_at || null,
+      })),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/annotations/:key', async (request, response, next) => {
+  try {
+    const annotation = await getAnnotation(request.params.key);
+    if (!annotation) return response.status(404).json({ error: 'Anotacao nao encontrada.' });
+    response.json(annotation);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/annotations/:key', async (request, response, next) => {
+  try {
+    response.json(await saveDraft(request.params.key, request.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/annotations/:key/image', async (request, response, next) => {
+  try {
+    const annotation = await getAnnotation(request.params.key);
+    if (!annotation) return response.status(404).end();
+    response.sendFile(resolveAnnotationImage(annotation));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/predictions/:group', async (request, response, next) => {
+  try {
+    response.json(await predictionFiles(request.params.group));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/predictions/:group/:file', async (request, response) => {
+  const target = resolvePredictionImage(request.params.group, request.params.file);
+  if (!target) return response.status(400).end();
+  try {
+    await fs.access(target);
+    response.sendFile(target);
+  } catch {
+    response.status(404).end();
+  }
+});
+
+app.get('/api/jobs', (_request, response) => response.json(listJobs()));
+app.get('/api/jobs/:id', (request, response) => {
+  const job = getJob(request.params.id);
+  response.status(job ? 200 : 404).json(job || { error: 'Job nao encontrado.' });
+});
+app.post('/api/jobs', (request, response, next) => {
+  try {
+    const type = request.body?.type as JobType;
+    if (!['train', 'validate', 'predict', 'tune'].includes(type)) {
+      return response.status(400).json({ error: 'Tipo de operacao invalido.' });
+    }
+    response.status(202).json(createJob(type, request.body?.options || {}));
+  } catch (error) {
+    next(error);
+  }
+});
+app.post('/api/jobs/:id/cancel', (request, response) => {
+  response.status(cancelJob(request.params.id) ? 200 : 409).json({ ok: true });
+});
+app.get('/api/jobs-stream', (request, response) => {
+  response.setHeader('Content-Type', 'text/event-stream');
+  response.setHeader('Cache-Control', 'no-cache');
+  response.setHeader('Connection', 'keep-alive');
+  response.flushHeaders();
+  const listener = (job: unknown) => response.write(`data: ${JSON.stringify(job)}\n\n`);
+  jobEvents.on('update', listener);
+  request.on('close', () => jobEvents.off('update', listener));
+});
+
+app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+  const message = error instanceof Error ? error.message : 'Erro inesperado.';
+  console.error(error);
+  response.status(500).json({ error: message });
+});
+
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(studioRoot, 'dist')));
+  app.get('/*splat', (_request, response) =>
+    response.sendFile(path.join(studioRoot, 'dist', 'index.html')),
+  );
+} else {
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: 'spa',
+  });
+  app.use(vite.middlewares);
+}
+
+app.listen(config.port, '0.0.0.0', () => {
+  console.log(`FarmGuard Studio em http://localhost:${config.port}`);
+  console.log(`FarmGuard: ${config.farmGuardRoot}`);
+  console.log(`Operacoes: ${config.allowFarmGuardJobs ? 'habilitadas' : 'bloqueadas'}`);
+});

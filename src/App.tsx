@@ -1,0 +1,318 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  Bug,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Database,
+  FlaskConical,
+  Gauge,
+  Image as ImageIcon,
+  Layers3,
+  LoaderCircle,
+  Maximize2,
+  Menu,
+  Play,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  TerminalSquare,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { api } from './api';
+import { AnnotationCanvas } from './components/AnnotationCanvas';
+import { MetricChart } from './components/MetricChart';
+import type { Annotation, AnnotationSummary, Job, Overview, Run } from './types';
+
+type Page = 'overview' | 'experiments' | 'operations' | 'annotator';
+
+const number = new Intl.NumberFormat('pt-BR');
+const percent = (value: number) => `${(value * 100).toFixed(1).replace('.', ',')}%`;
+const date = (value: string) =>
+  new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+const size = (value: number) => `${(value / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
+
+function StatusPill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: string }) {
+  return <span className={`status-pill ${tone}`}>{children}</span>;
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="empty-state"><CircleAlert size={22} />{children}</div>;
+}
+
+function App() {
+  const [page, setPage] = useState<Page>('overview');
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [mobileNav, setMobileNav] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setOverview(await api.overview());
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Falha ao carregar o FarmGuard.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const navigate = (next: Page) => {
+    setPage(next);
+    setMobileNav(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
+        <div className="brand">
+          <div className="brand-mark"><ShieldCheck size={25} /></div>
+          <div><strong>FarmGuard</strong><span>Studio</span></div>
+          <button className="mobile-close icon-button" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X /></button>
+        </div>
+        <nav>
+          <button className={page === 'overview' ? 'active' : ''} onClick={() => navigate('overview')}><Gauge />Visão geral</button>
+          <button className={page === 'experiments' ? 'active' : ''} onClick={() => navigate('experiments')}><FlaskConical />Experimentos</button>
+          <button className={page === 'operations' ? 'active' : ''} onClick={() => navigate('operations')}><TerminalSquare />Operações</button>
+          <button className={page === 'annotator' ? 'active' : ''} onClick={() => navigate('annotator')}><Maximize2 />Anotador</button>
+        </nav>
+        <div className="sidebar-foot">
+          <div className="connection"><i className={overview?.connected ? 'online' : ''} /><div><strong>{overview?.connected ? 'FarmGuard conectado' : 'Sem conexão'}</strong><span>somente leitura</span></div></div>
+          <div className="root-path" title={overview?.farmGuardRoot}>{overview?.farmGuardRoot || 'Localizando projeto…'}</div>
+        </div>
+      </aside>
+
+      <main>
+        <header className="topbar">
+          <button className="menu-button icon-button" onClick={() => setMobileNav(true)} aria-label="Abrir menu"><Menu /></button>
+          <div className="breadcrumb"><Bug size={17} /> Laboratório de visão computacional</div>
+          <div className="top-actions">
+            {overview && <StatusPill tone={overview.operationsEnabled ? 'success' : 'warning'}>{overview.operationsEnabled ? 'Execução liberada' : 'Execução protegida'}</StatusPill>}
+            <button className="icon-button" onClick={() => void load()} aria-label="Atualizar"><RefreshCw className={loading ? 'spin' : ''} /></button>
+          </div>
+        </header>
+
+        <div className="page-wrap">
+          {error && <div className="error-banner"><CircleAlert /> <span>{error}</span><button onClick={() => void load()}>Tentar novamente</button></div>}
+          {loading && !overview ? <div className="loading-page"><LoaderCircle className="spin" />Lendo o laboratório…</div> : null}
+          {overview && page === 'overview' && <OverviewPage data={overview} onNavigate={navigate} />}
+          {overview && page === 'experiments' && <ExperimentsPage data={overview} />}
+          {overview && page === 'operations' && <OperationsPage data={overview} onRefresh={load} />}
+          {page === 'annotator' && <AnnotatorPage onSaved={load} />}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function PageTitle({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
+  return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>;
+}
+
+function OverviewPage({ data, onNavigate }: { data: Overview; onNavigate: (page: Page) => void }) {
+  const completion = data.dataset.total ? data.dataset.reviewed / data.dataset.total : 0;
+  const best = [...data.runs].sort((a, b) => b.metrics.map50 - a.metrics.map50)[0];
+  return <>
+    <PageTitle eyebrow="Estado atual" title="Uma leitura clara do seu laboratório" description="Dataset, modelos e resultados reunidos sem alterar o projeto de origem." action={<button className="primary-button" onClick={() => onNavigate('operations')}><Play size={17} /> Nova operação</button>} />
+
+    <section className="kpi-grid">
+      <article className="kpi-card accent-lime"><div className="kpi-icon"><ImageIcon /></div><span>Imagens revisadas</span><strong>{data.dataset.reviewed}<small> / {data.dataset.total}</small></strong><div className="progress"><i style={{ width: `${completion * 100}%` }} /></div><p>{data.dataset.pending ? `${data.dataset.pending} ainda aguardam revisão` : 'Fila de revisão concluída'}</p></article>
+      <article className="kpi-card"><div className="kpi-icon"><Square /></div><span>Insetos anotados</span><strong>{number.format(data.dataset.boxes)}</strong><p>{data.dataset.total ? Math.round(data.dataset.boxes / data.dataset.total) : 0} boxes por imagem, em média</p></article>
+      <article className="kpi-card"><div className="kpi-icon"><Layers3 /></div><span>Pesos disponíveis</span><strong>{data.models.length}</strong><p>{data.runs.length} experimentos registrados</p></article>
+      <article className="kpi-card"><div className="kpi-icon"><Sparkles /></div><span>Melhor mAP50</span><strong>{best ? percent(best.metrics.map50) : '—'}</strong><p>{best?.name || 'Nenhum treinamento encontrado'}</p></article>
+    </section>
+
+    <section className="overview-grid">
+      <article className="panel wide">
+        <div className="panel-head"><div><span className="eyebrow">Comparativo</span><h2>Evolução dos melhores modelos</h2></div><button className="text-button" onClick={() => onNavigate('experiments')}>Abrir bancada <ChevronRight /></button></div>
+        <MetricChart runs={[...data.runs].sort((a, b) => b.metrics.map50 - a.metrics.map50).slice(0, 3)} />
+      </article>
+      <article className="panel">
+        <div className="panel-head"><div><span className="eyebrow">Cobertura</span><h2>Imagens por armadilha</h2></div></div>
+        <div className="trap-list">
+          {data.dataset.traps.map((trap) => { const max = data.dataset.traps[0]?.count || 1; return <div key={trap.name}><div><span>{trap.name}</span><strong>{trap.count}</strong></div><i><b style={{ width: `${trap.count / max * 100}%` }} /></i></div>; })}
+        </div>
+      </article>
+    </section>
+
+    <section className="panel">
+      <div className="panel-head"><div><span className="eyebrow">Registro de treino</span><h2>Experimentos recentes</h2></div><StatusPill>{data.runs.length} execuções</StatusPill></div>
+      <div className="table-wrap"><table><thead><tr><th>Experimento</th><th>Épocas</th><th>Precisão</th><th>Recall</th><th>mAP50</th><th>Atualizado</th><th>Pesos</th></tr></thead><tbody>
+        {data.runs.slice(0, 6).map((run) => <tr key={run.name}><td><strong>{run.name}</strong></td><td>{run.epochs}</td><td>{percent(run.metrics.precision)}</td><td>{percent(run.metrics.recall)}</td><td><span className="metric-value">{percent(run.metrics.map50)}</span></td><td>{date(run.modifiedAt)}</td><td>{run.hasBest ? <StatusPill tone="success">best.pt</StatusPill> : <StatusPill>—</StatusPill>}</td></tr>)}
+      </tbody></table></div>
+    </section>
+  </>;
+}
+
+function ExperimentsPage({ data }: { data: Overview }) {
+  const [selected, setSelected] = useState<string[]>(data.runs.slice(0, 2).map((run) => run.name));
+  const [metric, setMetric] = useState<keyof Run['metrics']>('map50');
+  const [gallery, setGallery] = useState<string | null>(null);
+  const [galleryFiles, setGalleryFiles] = useState<string[]>([]);
+  const compared = selected.map((name) => data.runs.find((run) => run.name === name)).filter(Boolean) as Run[];
+  const toggle = (name: string) => setSelected((current) => current.includes(name) ? current.filter((item) => item !== name) : current.length < 4 ? [...current, name] : [...current.slice(1), name]);
+  const openGallery = async (name: string) => { setGallery(name); setGalleryFiles(await api.predictionFiles(name)); };
+  return <>
+    <PageTitle eyebrow="Bancada de modelos" title="Compare decisões, não só arquivos" description="Coloque até quatro treinamentos lado a lado e acompanhe o que mudou ao longo das épocas." />
+    <section className="panel compare-panel">
+      <div className="panel-head"><div><span className="eyebrow">Curvas de validação</span><h2>Desempenho por época</h2></div><div className="segmented">
+        {(['map50', 'map5095', 'precision', 'recall'] as const).map((item) => <button key={item} className={metric === item ? 'active' : ''} onClick={() => setMetric(item)}>{item === 'map5095' ? 'mAP50–95' : item}</button>)}
+      </div></div>
+      {compared.length ? <MetricChart runs={compared} metric={metric} height={280} /> : <Empty>Selecione ao menos um experimento abaixo.</Empty>}
+    </section>
+    <section className="experiment-grid">
+      {data.runs.map((run) => <article key={run.name} className={`run-card ${selected.includes(run.name) ? 'selected' : ''}`} onClick={() => toggle(run.name)}>
+        <div className="run-check">{selected.includes(run.name) && <Check size={15} />}</div>
+        <div className="run-card-head"><div><span>{run.epochs} épocas</span><h3>{run.name}</h3></div><StatusPill tone={run.metrics.map50 > .7 ? 'success' : run.metrics.map50 > .3 ? 'warning' : 'neutral'}>{percent(run.metrics.map50)} mAP50</StatusPill></div>
+        <div className="run-metrics"><div><span>Precisão</span><strong>{percent(run.metrics.precision)}</strong></div><div><span>Recall</span><strong>{percent(run.metrics.recall)}</strong></div><div><span>mAP50–95</span><strong>{percent(run.metrics.map5095)}</strong></div></div>
+        <div className="run-foot"><span>{date(run.modifiedAt)}</span><span>{run.hasBest ? 'best.pt disponível' : 'sem best.pt'}</span></div>
+      </article>)}
+    </section>
+    <section className="panel">
+      <div className="panel-head"><div><span className="eyebrow">Calibração</span><h2>Melhores combinações de threshold</h2></div><StatusPill>{data.thresholds.length} testes lidos</StatusPill></div>
+      {data.thresholds.length ? <div className="table-wrap"><table><thead><tr><th>Confiança</th><th>NMS IoU</th><th>Precisão</th><th>Recall</th><th>F1</th><th>TP</th><th>FP</th><th>FN</th><th>Edições estimadas</th></tr></thead><tbody>
+        {data.thresholds.slice(0, 8).map((row, index) => <tr key={index}><td><strong>{Number(row.confidence).toFixed(2)}</strong></td><td>{Number(row.nms_iou).toFixed(2)}</td><td>{percent(Number(row.precision))}</td><td>{percent(Number(row.recall))}</td><td><span className="metric-value">{percent(Number(row.f1))}</span></td><td>{row.tp}</td><td>{row.fp}</td><td>{row.fn}</td><td>{row.edit_proxy}</td></tr>)}
+      </tbody></table></div> : <Empty>Nenhum sweep de thresholds encontrado.</Empty>}
+    </section>
+    <section className="panel">
+      <div className="panel-head"><div><span className="eyebrow">Inspeção visual</span><h2>Galerias de predição</h2></div><StatusPill>{data.predictions.length} lotes</StatusPill></div>
+      <div className="prediction-grid">{data.predictions.map((prediction) => <button key={prediction.name} className="prediction-card" onClick={() => void openGallery(prediction.name)}>
+        <div className="prediction-preview">{prediction.preview ? <img src={`/api/predictions/${encodeURIComponent(prediction.name)}/${encodeURIComponent(prediction.preview)}`} alt="" /> : <ImageIcon />}</div><div><strong>{prediction.name}</strong><span>{prediction.count} imagens · {date(prediction.modifiedAt)}</span></div><ChevronRight />
+      </button>)}</div>
+    </section>
+    {gallery && <div className="modal-backdrop" onMouseDown={() => setGallery(null)}><div className="gallery-modal" onMouseDown={(event) => event.stopPropagation()}><div className="panel-head"><div><span className="eyebrow">Predições</span><h2>{gallery}</h2></div><button className="icon-button" onClick={() => setGallery(null)}><X /></button></div><div className="gallery-grid">{galleryFiles.map((file) => <figure key={file}><img src={`/api/predictions/${encodeURIComponent(gallery)}/${encodeURIComponent(file)}`} alt={file} loading="lazy" /><figcaption>{file}</figcaption></figure>)}</div></div></div>}
+  </>;
+}
+
+function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => Promise<void> }) {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [type, setType] = useState<Job['type']>('validate');
+  const [model, setModel] = useState(data.models[0]?.path || '');
+  const [name, setName] = useState('studio-experiment');
+  const [message, setMessage] = useState('');
+  const loadJobs = useCallback(async () => setJobs(await api.jobs()), []);
+  useEffect(() => {
+    void loadJobs();
+    const events = new EventSource('/api/jobs-stream');
+    events.onmessage = (event) => {
+      const changed = JSON.parse(event.data) as Job;
+      setJobs((current) => [changed, ...current.filter((job) => job.id !== changed.id)]);
+      if (['completed', 'failed'].includes(changed.status)) void onRefresh();
+    };
+    return () => events.close();
+  }, [loadJobs, onRefresh]);
+  const submit = async () => {
+    setMessage('');
+    try {
+      const job = await api.createJob(type, { model, name });
+      setJobs((current) => [job, ...current]);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar.'); }
+  };
+  const active = jobs.find((job) => job.status === 'running') || jobs[0];
+  return <>
+    <PageTitle eyebrow="Central de execução" title="Do clique ao log, sem trocar de tela" description="Prepare treinos, validações, predições e calibrações com os pesos já catalogados." />
+    {!data.operationsEnabled && <div className="safety-banner"><ShieldCheck /><div><strong>Proteção de escrita ativa</strong><p>Os comandos estão montados, mas não serão executados enquanto a autorização de escrita no FarmGuard estiver desativada.</p></div></div>}
+    <section className="operations-grid">
+      <article className="panel operation-form">
+        <div className="panel-head"><div><span className="eyebrow">Nova tarefa</span><h2>Configurar operação</h2></div></div>
+        <label>Tipo de operação</label>
+        <div className="operation-types">{([
+          ['train', 'Treinar', Activity], ['validate', 'Validar', Check], ['predict', 'Predizer', ImageIcon], ['tune', 'Calibrar', SlidersHorizontal],
+        ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
+        <label htmlFor="model">Pesos / checkpoint</label>
+        <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select>
+        {type === 'train' && <><label htmlFor="name">Nome do experimento</label><input id="name" value={name} onChange={(event) => setName(event.target.value)} /></>}
+        <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
+        {message && <div className="inline-error"><CircleAlert />{message}</div>}
+        <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled}><Play />{data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
+      </article>
+      <article className="panel terminal-panel">
+        <div className="panel-head"><div><span className="eyebrow">Saída em tempo real</span><h2>{active ? `${active.type} · ${active.status}` : 'Nenhuma tarefa nesta sessão'}</h2></div>{active && <StatusPill tone={active.status === 'completed' ? 'success' : active.status === 'failed' ? 'danger' : active.status === 'running' ? 'warning' : 'neutral'}>{active.status}</StatusPill>}</div>
+        <div className="terminal"><div className="terminal-chrome"><i /><i /><i /></div><pre>{active ? (active.logs.length ? active.logs.join('\n') : `$ ${active.command.join(' ')}\n\nAguardando saída…`) : 'As mensagens de treino e avaliação aparecerão aqui.'}</pre></div>
+      </article>
+    </section>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">Sessão atual</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} onClick={() => setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada nesta sessão.</Empty>}</section>
+  </>;
+}
+
+function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [list, setList] = useState<AnnotationSummary[]>([]);
+  const [index, setIndex] = useState(0);
+  const [annotation, setAnnotation] = useState<Annotation | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [history, setHistory] = useState<Annotation['boxes'][]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState('');
+  const [message, setMessage] = useState('');
+  const visible = useMemo(() => list.filter((item) => !filter || item.trap?.toLowerCase().includes(filter.toLowerCase()) || item.image.includes(filter)), [list, filter]);
+  useEffect(() => { api.annotations().then(setList).catch((error) => setMessage(error.message)); }, []);
+  useEffect(() => {
+    const item = visible[index];
+    if (!item) return;
+    api.annotation(item.key).then((value) => { setAnnotation(value); setHistory([]); setSelected(null); setDirty(false); }).catch((error) => setMessage(error.message));
+  }, [visible, index]);
+  useEffect(() => { setIndex(0); }, [filter]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (!annotation) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        const previous = history.at(-1);
+        if (previous) { setAnnotation({ ...annotation, boxes: previous }); setHistory((items) => items.slice(0, -1)); setDirty(true); }
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null && !(event.target instanceof HTMLInputElement)) {
+        setHistory((items) => [...items, annotation.boxes]);
+        setAnnotation({ ...annotation, boxes: annotation.boxes.filter((_, boxIndex) => boxIndex !== selected) });
+        setSelected(null); setDirty(true);
+      }
+      if (event.key === 'Enter' && !(event.target instanceof HTMLInputElement)) void save(true);
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
+  const updateBoxes = (boxes: Annotation['boxes']) => { if (annotation) { setAnnotation({ ...annotation, boxes }); setDirty(true); } };
+  const historyPoint = () => { if (annotation) setHistory((items) => [...items.slice(-39), annotation.boxes.map((box) => ({ ...box }))]); };
+  const save = async (advance = false) => {
+    if (!annotation) return;
+    setSaving(true); setMessage('');
+    try {
+      const saved = await api.saveAnnotation({ ...annotation, reviewed: true });
+      setAnnotation(saved); setDirty(false); await onSaved();
+      if (advance && index < visible.length - 1) setIndex((current) => current + 1);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao salvar.'); }
+    finally { setSaving(false); }
+  };
+  const exclude = () => { if (annotation) { setAnnotation({ ...annotation, excluded: !annotation.excluded }); setDirty(true); } };
+  return <>
+    <PageTitle eyebrow="Anotação integrada" title="Revise no mesmo lugar em que você avalia" description="As alterações ficam em rascunhos do Studio; os JSONs originais do FarmGuard permanecem intocados." action={<div className="annotator-actions"><button className="secondary-button" onClick={exclude} disabled={!annotation}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void save(false)} disabled={!annotation || saving}><Save />{saving ? 'Salvando…' : dirty ? 'Salvar rascunho' : 'Rascunho salvo'}</button></div>} />
+    {message && <div className="error-banner"><CircleAlert />{message}</div>}
+    <section className="annotator-layout">
+      <aside className="annotation-queue panel">
+        <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens</h2></div><StatusPill>{index + 1} / {visible.length}</StatusPill></div>
+        <input placeholder="Filtrar armadilha ou arquivo" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        <div className="queue-list">{visible.map((item, itemIndex) => <button key={item.key} className={itemIndex === index ? 'active' : ''} onClick={() => setIndex(itemIndex)}><span className="queue-thumb"><img src={`/api/annotations/${item.key}/image`} loading="lazy" alt="" /></span><span><strong>{item.trap || 'Sem armadilha'}</strong><small>{item.boxes} boxes · {item.reviewed ? 'revisada' : 'pendente'}</small></span>{item.excluded && <Trash2 size={14} />}</button>)}</div>
+      </aside>
+      <div className="annotation-workspace">
+        {annotation ? <>
+          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : 'Original · somente leitura'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes</span></div><div><button className="icon-button" disabled={index === 0} onClick={() => setIndex((value) => value - 1)}><ChevronLeft /></button><button className="icon-button" disabled={index >= visible.length - 1} onClick={() => setIndex((value) => value + 1)}><ChevronRight /></button></div></div>
+          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} selected={selected} onSelected={setSelected} onChange={updateBoxes} onHistoryPoint={historyPoint} />
+          <div className="annotation-bottom"><div><span>Box selecionada</span><strong>{selected === null ? 'Nenhuma' : `#${selected + 1}`}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}<button className="primary-button" onClick={() => void save(true)}><Check />Concluir + próxima</button></div>
+        </> : <div className="loading-page"><LoaderCircle className="spin" />Carregando imagem…</div>}
+      </div>
+    </section>
+  </>;
+}
+
+export default App;
