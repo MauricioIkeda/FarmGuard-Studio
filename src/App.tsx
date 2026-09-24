@@ -384,10 +384,15 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   const [future, setFuture] = useState<Annotation['boxes'][]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmExclude, setConfirmExclude] = useState(false);
+  const cancelExcludeRef = useRef<HTMLButtonElement>(null);
   const [filter, setFilter] = useState('');
   const [status, setStatus] = useState<'all' | 'pending' | 'reviewed' | 'excluded'>('pending');
   const [message, setMessage] = useState('');
   const [queueExpanded, setQueueExpanded] = useState(true);
+  useEffect(() => {
+    if (confirmExclude) cancelExcludeRef.current?.focus();
+  }, [confirmExclude]);
   const queueCounts = useMemo(() => ({
     all: list.length,
     pending: list.filter((item) => !item.reviewed && !item.excluded).length,
@@ -411,16 +416,16 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
     }).catch((error) => { if (active) setMessage(error.message); });
     return () => { active = false; };
   }, [visible, index]);
-  const persist = async (reviewed: boolean) => {
+  const persist = async (reviewed: boolean, changes: Partial<Annotation> = {}) => {
     if (!annotation || saving) return false;
     setSaving(true); setMessage('');
     try {
-      const saved = await api.saveAnnotation({ ...annotation, reviewed });
+      const saved = await api.saveAnnotation({ ...annotation, ...changes, reviewed });
       setAnnotation(saved); setDirty(false);
       setList((items) => items.map((item) => item.key === saved.key ? {
         ...item, reviewed: saved.reviewed, excluded: saved.excluded, boxes: saved.boxes.length, cached: true,
       } : item));
-      await onSaved();
+      void onSaved().catch((error) => console.warn('Rascunho salvo, mas falhou a atualização do painel:', error));
       return true;
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Falha ao salvar.');
@@ -474,6 +479,10 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (confirmExclude) {
+        if (event.key === 'Escape' && !saving) setConfirmExclude(false);
+        return;
+      }
       if (!annotation) return;
       const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
@@ -505,7 +514,18 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
       else if (nextIndex >= 0) setIndex(nextIndex);
     } else setMessage('Revisão concluída: não há mais imagens pendentes nesta fila.');
   };
-  const exclude = () => { if (annotation) { setAnnotation({ ...annotation, excluded: !annotation.excluded }); setDirty(true); } };
+  const exclude = () => {
+    if (!annotation || saving) return;
+    if (annotation.excluded) { void persist(annotation.reviewed, { excluded: false }); return; }
+    setMessage('');
+    setConfirmExclude(true);
+  };
+  const confirmExclusion = async () => {
+    if (annotation && await persist(annotation.reviewed, { excluded: true })) {
+      setConfirmExclude(false);
+      setSelected(null);
+    }
+  };
   const uploadParquet = async (file?: File) => {
     if (!file) return;
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
@@ -517,7 +537,7 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao importar Parquet.'); }
   };
   return <>
-    <PageTitle eyebrow="Anotação integrada" title="Fila de revisão" description="Pendentes primeiro, com prioridade para as armadilhas FARMLAB. As edições ficam em rascunhos do Studio até a publicação controlada." action={<div className="annotator-actions"><label className="secondary-button file-upload"><UploadCloud />Atualizar Parquet<input type="file" accept=".parquet" onChange={(event) => { void uploadParquet(event.target.files?.[0]); event.target.value = ''; }} /></label><button className="secondary-button" onClick={exclude} disabled={!annotation}><Trash2 />{annotation?.excluded ? 'Restaurar' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void persist(annotation?.reviewed || false)} disabled={!annotation || saving || !dirty}><Save />{saving ? 'Salvando…' : 'Salvar rascunho'}</button></div>} />
+    <PageTitle eyebrow="Anotação integrada" title="Fila de revisão" description="Pendentes primeiro, com prioridade para as armadilhas FARMLAB. As edições ficam em rascunhos do Studio até a publicação controlada." action={<div className="annotator-actions"><label className="secondary-button file-upload"><UploadCloud />Atualizar Parquet<input type="file" accept=".parquet" onChange={(event) => { void uploadParquet(event.target.files?.[0]); event.target.value = ''; }} /></label><button className="secondary-button" onClick={exclude} disabled={!annotation || saving}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void persist(annotation?.reviewed || false)} disabled={!annotation || saving || !dirty}><Save />{saving ? 'Salvando…' : 'Salvar rascunho'}</button></div>} />
     {message && <div className="error-banner"><CircleAlert />{message}</div>}
     <section className="annotator-layout">
       <aside className={`annotation-queue panel ${queueExpanded ? '' : 'compact'}`}>
@@ -538,6 +558,7 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
         </> : <div className="loading-page">{visible.length ? <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
       </div>
     </section>
+    {confirmExclude && annotation && <div className="modal-backdrop" onMouseDown={() => { if (!saving) setConfirmExclude(false); }}><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-exclude-title" aria-describedby="confirm-exclude-description" onMouseDown={(event) => event.stopPropagation()}><div className="confirm-modal-icon"><Trash2 /></div><h2 id="confirm-exclude-title">Excluir esta imagem?</h2><p id="confirm-exclude-description">Ela ficará no filtro Excluídas e não entrará no DatasetYolo após a publicação. {annotation.boxes.length ? `${annotation.boxes.length} box(es) serão preservadas no rascunho para uma possível restauração.` : 'Você poderá restaurá-la depois.'}</p>{message && <div className="inline-error"><CircleAlert />{message}</div>}<div className="confirm-modal-actions"><button ref={cancelExcludeRef} type="button" className="secondary-button" disabled={saving} onClick={() => setConfirmExclude(false)}>Cancelar</button><button type="button" className="danger-button" disabled={saving} onClick={() => void confirmExclusion()}><Trash2 />{saving ? 'Salvando…' : 'Excluir imagem e salvar'}</button></div></div></div>}
   </>;
 }
 
