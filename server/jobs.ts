@@ -4,8 +4,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { config, farmPaths } from './config.js';
+import { discoverDrive, remoteProjectRoot } from './drive.js';
+import { studioRoot } from './config.js';
 
-export type JobType = 'train' | 'validate' | 'predict' | 'tune';
+export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
 export type Job = {
   id: string;
   type: JobType;
@@ -34,7 +36,7 @@ function safeName(value: unknown, fallback: string) {
   return normalized || fallback;
 }
 
-function buildCommand(type: JobType, options: Record<string, unknown>) {
+async function buildCommand(type: JobType, options: Record<string, unknown>) {
   const python = pythonExecutable();
   if (type === 'train') {
     const args = [path.join(farmPaths.training, 'train.py')];
@@ -52,7 +54,45 @@ function buildCommand(type: JobType, options: Record<string, unknown>) {
     if (options.model) args.push('--model', String(options.model));
     return [python, ...args];
   }
-  return [python, path.join(farmPaths.training, 'predict.py')];
+  if (type === 'predict') {
+    const args = [path.join(studioRoot, 'server', 'python', 'predict.py')];
+    if (options.model) args.push('--model', String(options.model));
+    args.push('--name', safeName(options.name, `studio-predict-${Date.now()}`));
+    return [python, ...args];
+  }
+  if (type === 'dataset') {
+    return [python, path.join(farmPaths.ia, 'DatasetCreator', 'dataset.py')];
+  }
+  const drive = await discoverDrive();
+  if (!drive) throw new Error('Google Drive nao configurado.');
+  if (type === 'drive-pull') {
+    return [
+      drive.executable,
+      'copy',
+      remoteProjectRoot(drive),
+      farmPaths.annotationRoot,
+      '--config',
+      drive.configFile,
+      '--ignore-existing',
+      '--create-empty-src-dirs',
+      '--stats-one-line',
+      '--stats',
+      '5s',
+    ];
+  }
+  return [
+    drive.executable,
+    'copy',
+    farmPaths.annotationRoot,
+    remoteProjectRoot(drive),
+    '--config',
+    drive.configFile,
+    '--checksum',
+    '--create-empty-src-dirs',
+    '--stats-one-line',
+    '--stats',
+    '5s',
+  ];
 }
 
 async function persist(job: Job) {
@@ -78,13 +118,13 @@ export function getJob(id: string) {
   return jobs.get(id);
 }
 
-export function createJob(type: JobType, options: Record<string, unknown>) {
+export async function createJob(type: JobType, options: Record<string, unknown>) {
   if (!config.allowFarmGuardJobs) {
     throw new Error(
       'Operacoes desativadas. Defina ALLOW_FARMGUARD_JOBS=true somente depois de autorizar escritas de resultados no FarmGuard.',
     );
   }
-  const command = buildCommand(type, options);
+  const command = await buildCommand(type, options);
   const job: Job = {
     id: crypto.randomUUID(),
     type,
@@ -107,7 +147,12 @@ function run(job: Job) {
   const child = spawn(executable, args, {
     cwd: farmPaths.training,
     shell: false,
-    env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+    },
   });
   processes.set(job.id, child);
   const capture = (chunk: Buffer, channel: string) => {

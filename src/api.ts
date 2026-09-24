@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationSummary, Job, Overview } from './types';
+import type { Annotation, AnnotationSummary, AuthStatus, Job, Overview, PublicationChange } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -8,6 +8,14 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  authStatus: () => request<AuthStatus>('/api/auth/status'),
+  login: (username: string, password: string) =>
+    request<AuthStatus>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: () => request<AuthStatus>('/api/auth/logout', { method: 'POST' }),
   overview: () => request<Overview>('/api/overview'),
   annotations: () => request<AnnotationSummary[]>('/api/annotations'),
   annotation: (key: string) => request<Annotation>(`/api/annotations/${key}`),
@@ -26,4 +34,11 @@ export const api = {
     }),
   predictionFiles: (group: string) =>
     request<string[]>(`/api/predictions/${encodeURIComponent(group)}`),
+  publicationPlan: () => request<PublicationChange[]>('/api/publication/plan'),
+  publishDrafts: (keys: string[], rebuild = true) =>
+    request<{ published: string[]; backupRoot: string; job: Job | null }>('/api/publication/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys, rebuild }),
+    }),
 };

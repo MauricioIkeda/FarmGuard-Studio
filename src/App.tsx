@@ -3,6 +3,7 @@ import {
   Activity,
   Bug,
   Check,
+  Cloud,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -11,6 +12,8 @@ import {
   Gauge,
   Image as ImageIcon,
   Layers3,
+  LockKeyhole,
+  LogOut,
   LoaderCircle,
   Maximize2,
   Menu,
@@ -23,12 +26,13 @@ import {
   Square,
   TerminalSquare,
   Trash2,
+  UploadCloud,
   X,
 } from 'lucide-react';
 import { api } from './api';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { MetricChart } from './components/MetricChart';
-import type { Annotation, AnnotationSummary, Job, Overview, Run } from './types';
+import type { Annotation, AnnotationSummary, Job, Overview, PublicationChange, Run } from './types';
 
 type Page = 'overview' | 'experiments' | 'operations' | 'annotator';
 
@@ -46,7 +50,7 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="empty-state"><CircleAlert size={22} />{children}</div>;
 }
 
-function App() {
+function StudioApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<Page>('overview');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState('');
@@ -100,6 +104,7 @@ function App() {
           <div className="top-actions">
             {overview && <StatusPill tone={overview.operationsEnabled ? 'success' : 'warning'}>{overview.operationsEnabled ? 'Execução liberada' : 'Execução protegida'}</StatusPill>}
             <button className="icon-button" onClick={() => void load()} aria-label="Atualizar"><RefreshCw className={loading ? 'spin' : ''} /></button>
+            <button className="icon-button" onClick={onLogout} aria-label="Sair"><LogOut /></button>
           </div>
         </header>
 
@@ -228,11 +233,11 @@ function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => 
         <div className="panel-head"><div><span className="eyebrow">Nova tarefa</span><h2>Configurar operação</h2></div></div>
         <label>Tipo de operação</label>
         <div className="operation-types">{([
-          ['train', 'Treinar', Activity], ['validate', 'Validar', Check], ['predict', 'Predizer', ImageIcon], ['tune', 'Calibrar', SlidersHorizontal],
+          ['train', 'Treinar', Activity], ['validate', 'Validar', Check], ['predict', 'Predizer', ImageIcon], ['tune', 'Calibrar', SlidersHorizontal], ['dataset', 'Gerar YOLO', Database], ['drive', 'Backup Drive', Cloud],
         ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
-        <label htmlFor="model">Pesos / checkpoint</label>
-        <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select>
-        {type === 'train' && <><label htmlFor="name">Nome do experimento</label><input id="name" value={name} onChange={(event) => setName(event.target.value)} /></>}
+        {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">Pesos / checkpoint</label>
+        <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
+        {(type === 'train' || type === 'predict') && <><label htmlFor="name">Nome da execução</label><input id="name" value={name} onChange={(event) => setName(event.target.value)} /></>}
         <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
         {message && <div className="inline-error"><CircleAlert />{message}</div>}
         <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled}><Play />{data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
@@ -243,7 +248,50 @@ function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => 
       </article>
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">Sessão atual</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} onClick={() => setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada nesta sessão.</Empty>}</section>
+    <PublicationPanel data={data} onUpdated={async () => { await loadJobs(); await onRefresh(); }} />
   </>;
+}
+
+function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () => Promise<void> }) {
+  const [plan, setPlan] = useState<PublicationChange[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [message, setMessage] = useState('');
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await api.publicationPlan();
+      setPlan(next);
+      setSelected(next.filter((item) => item.changed).map((item) => item.key));
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao montar plano.'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const changed = plan.filter((item) => item.changed);
+  const publish = async () => {
+    setPublishing(true); setMessage('');
+    try {
+      const result = await api.publishDrafts(selected, true);
+      setMessage(`${result.published.length} anotação(ões) publicadas. A reconstrução YOLO foi iniciada.`);
+      await refresh(); await onUpdated();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha na publicação.'); }
+    finally { setPublishing(false); }
+  };
+  return <section className="publish-grid">
+    <article className="panel drive-card">
+      <div className="panel-head"><div><span className="eyebrow">Google Drive</span><h2>Backup do dataset fonte</h2></div><StatusPill tone={data.drive.connected ? 'success' : 'danger'}>{data.drive.connected ? 'Conectado' : 'Indisponível'}</StatusPill></div>
+      <div className="drive-visual"><Cloud /><div><strong>{data.drive.remote || 'Sem remote'}</strong><span>{data.drive.projectRoot || 'Configure o rclone para habilitar.'}</span></div></div>
+      <p>Rascunhos são enviados para <code>studio-drafts</code>. Após a publicação, os JSONs canônicos também são atualizados no Drive.</p>
+      <div className="drive-actions"><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive-pull', {}).then(onUpdated)}><Cloud />Importar novos arquivos</button><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive', {}).then(onUpdated)}><UploadCloud />Fazer backup agora</button></div>
+    </article>
+    <article className="panel publication-card">
+      <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard → YOLO</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
+      {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => <label key={item.key}><input type="checkbox" checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><span><strong>{item.trap || item.image}</strong><small>{item.boxesBefore} → {item.boxesAfter} boxes{item.excludedBefore !== item.excludedAfter ? ` · ${item.excludedAfter ? 'excluir' : 'restaurar'}` : ''}</small></span></label>)}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
+      {message && <div className={message.includes('publicadas') ? 'inline-success' : 'inline-error'}>{message}</div>}
+      <button className="primary-button full" disabled={!selected.length || publishing} onClick={() => void publish()}><UploadCloud />{publishing ? 'Publicando…' : 'Publicar e reconstruir DatasetYolo'}</button>
+    </article>
+  </section>;
 }
 
 function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
@@ -313,6 +361,42 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
       </div>
     </section>
   </>;
+}
+
+function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); setLoading(true); setError('');
+    try { await api.login(username, password); onAuthenticated(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao entrar.'); }
+    finally { setLoading(false); }
+  };
+  return <main className="login-page">
+    <div className="login-orbit"><ShieldCheck /></div>
+    <form className="login-card" onSubmit={submit}>
+      <div className="brand login-brand"><div className="brand-mark"><ShieldCheck size={25} /></div><div><strong>FarmGuard</strong><span>Studio</span></div></div>
+      <span className="eyebrow">Acesso ao laboratório</span>
+      <h1>Entre para continuar</h1>
+      <p>Esta bancada controla arquivos e processos do computador principal.</p>
+      <label htmlFor="username">Usuário</label>
+      <div className="login-input"><LockKeyhole /><input id="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} /></div>
+      <label htmlFor="password">Senha</label>
+      <div className="login-input"><LockKeyhole /><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus /></div>
+      {error && <div className="inline-error"><CircleAlert />{error}</div>}
+      <button className="primary-button full" disabled={loading}>{loading ? <LoaderCircle className="spin" /> : <ShieldCheck />}Entrar no Studio</button>
+    </form>
+  </main>;
+}
+
+function App() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  useEffect(() => { api.authStatus().then((status) => setAuthenticated(status.authenticated)).catch(() => setAuthenticated(false)); }, []);
+  if (authenticated === null) return <div className="loading-page full-page"><LoaderCircle className="spin" />Verificando acesso…</div>;
+  if (!authenticated) return <LoginPage onAuthenticated={() => setAuthenticated(true)} />;
+  return <StudioApp onLogout={() => void api.logout().finally(() => setAuthenticated(false))} />;
 }
 
 export default App;

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, farmPaths } from './config.js';
+import { backupDraft, driveStatus } from './drive.js';
 
 export type AnnotationBox = {
   x: number;
@@ -227,17 +228,21 @@ export async function saveDraft(key: string, input: Annotation) {
   await fs.mkdir(draftDir, { recursive: true });
   const target = path.join(draftDir, `${key}.json`);
   await fs.writeFile(target, `${JSON.stringify(clean, null, 2)}\n`, 'utf8');
+  void backupDraft(target).catch((error) =>
+    console.error('Falha ao enviar rascunho ao Drive:', error),
+  );
   return { ...clean, studioDraft: true };
 }
 
 export async function overview() {
-  const [annotations, runs, directModels, runModels, predictions] =
+  const [annotations, runs, directModels, runModels, predictions, drive] =
     await Promise.all([
       listAnnotations(),
       listRuns(),
       walkWeights(farmPaths.models, 'model'),
       walkWeights(farmPaths.runs, 'run'),
       listPredictions(),
+      driveStatus(),
     ]);
   const drafts = await files(path.join(config.dataRoot, 'annotation-drafts'));
   const traps = new Map<string, number>();
@@ -274,6 +279,7 @@ export async function overview() {
       b.modifiedAt.localeCompare(a.modifiedAt),
     ),
     thresholds: thresholdRows.slice(0, 24),
+    drive,
   };
 }
 

@@ -20,6 +20,14 @@ export const config = {
   dataRoot: path.join(studioRoot, 'data'),
   allowFarmGuardJobs:
     String(process.env.ALLOW_FARMGUARD_JOBS).toLowerCase() === 'true',
+  authEnabled: String(process.env.AUTH_ENABLED ?? 'true').toLowerCase() === 'true',
+  adminUsername: process.env.ADMIN_USERNAME || 'admin',
+  adminPassword: process.env.ADMIN_PASSWORD || '',
+  sessionSecret: process.env.SESSION_SECRET || '',
+  driveRemote: process.env.INSECT_AI_DRIVE_REMOTE || 'nte-google-drive',
+  driveRoot: process.env.INSECT_AI_DRIVE_ROOT || 'Insect AI Datasets',
+  rclonePath: process.env.INSECT_AI_RCLONE_PATH || '',
+  rcloneConfig: process.env.INSECT_AI_RCLONE_CONFIG || '',
 };
 
 export const farmPaths = {

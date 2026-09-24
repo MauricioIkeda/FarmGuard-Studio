@@ -12,8 +12,10 @@ O Studio é um repositório independente. Por padrão, ele acessa o FarmGuard so
 - tabela de calibração do `threshold-sweep.csv`;
 - galeria das predições existentes;
 - central de operações para `train.py`, `val.py`, `predict.py` e `tune_thresholds.py`;
+- reconstrução do `DatasetYolo` e backup do dataset fonte no Google Drive;
 - anotador web com criação, seleção, movimento, redimensionamento e exclusão de boxes, zoom, pan e desfazer;
-- salvamento de anotações como rascunho isolado, sem alterar os JSONs do FarmGuard.
+- publicação controlada de rascunhos, com diff, backup local e reconstrução do YOLO;
+- autenticação por sessão, limitação de tentativas e cookies seguros para acesso remoto.
 
 ## Executar
 
@@ -42,7 +44,13 @@ ALLOW_FARMGUARD_JOBS=false
 PORT=4310
 ```
 
-`ALLOW_FARMGUARD_JOBS` fica desativado porque os scripts atuais criam saídas dentro de `Iazinha/Training`. Só altere para `true` depois de autorizar esse comportamento.
+`ALLOW_FARMGUARD_JOBS` libera os scripts que criam saídas dentro de `Iazinha/Training` e a reconstrução de `DatasetYolo`.
+
+`ADMIN_PASSWORD` e `SESSION_SECRET` são obrigatórios quando `AUTH_ENABLED=true`. O arquivo `.env` local é ignorado pelo Git.
+
+O Studio detecta automaticamente o `rclone` gerenciado pelo NTE Localization Studio. A fonte de verdade é sincronizada em `Insect AI Datasets/traps_events`; rascunhos ainda não publicados ficam em `studio-drafts`.
+
+“Importar novos arquivos” usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. “Fazer backup agora” envia o estado local de forma não destrutiva.
 
 ## Cloudflare Tunnel
 
@@ -52,13 +60,22 @@ Com o Studio em execução, o tunnel deve encaminhar o domínio escolhido para `
 cloudflared tunnel --url http://localhost:4310
 ```
 
-Para exposição permanente, use um tunnel nomeado e proteja o domínio com Cloudflare Access. O Studio permite iniciar processos locais e não deve ficar público sem autenticação.
+Para um tunnel nomeado por token:
+
+```powershell
+$env:CLOUDFLARE_TUNNEL_TOKEN='token-do-tunnel'
+.\scripts\start-cloudflare.ps1
+```
+
+O login do Studio continua obrigatório atrás do tunnel. Para uma segunda camada, configure também uma política do Cloudflare Access para o hostname.
 
 ## Limite de escrita
 
 - leitura: arquivos do FarmGuard;
 - escrita do anotador: `FarmGuard-Studio/data/annotation-drafts`;
 - histórico de tarefas: `FarmGuard-Studio/data/jobs`;
-- execução dos scripts: bloqueada por padrão.
+- backups antes de publicação: `FarmGuard-Studio/data/publication-backups`;
+- publicação autorizada: `FarmGuard/Iazinha/DatasetCreator/.../annotations` e `DatasetYolo`;
+- resultados autorizados: `FarmGuard/Iazinha/Training/runs` e `predictions`.
 
-Nenhum arquivo do FarmGuard é modificado durante a instalação, build ou uso em modo protegido.
+O código-fonte do FarmGuard não é alterado. Somente artefatos de dataset e execução são escritos pelas ações explícitas do Studio.

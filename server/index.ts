@@ -21,9 +21,33 @@ import {
   listJobs,
   type JobType,
 } from './jobs.js';
+import { authStatus, login, logout, requireAuth } from './auth.js';
+import { driveStatus } from './drive.js';
+import { publicationPlan, publishDrafts } from './publication.js';
 
 const app = express();
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use((_request, response, next) => {
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('X-Frame-Options', 'DENY');
+  response.setHeader('Referrer-Policy', 'no-referrer');
+  response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  const scriptPolicy = process.env.NODE_ENV === 'production'
+    ? "script-src 'self'"
+    : "script-src 'self' 'unsafe-inline'";
+  response.setHeader(
+    'Content-Security-Policy',
+    `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; ${scriptPolicy}; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+  );
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
+
+app.get('/api/auth/status', authStatus);
+app.post('/api/auth/login', login);
+app.post('/api/auth/logout', logout);
+app.use('/api', requireAuth);
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true, operationsEnabled: config.allowFarmGuardJobs });
@@ -110,13 +134,13 @@ app.get('/api/jobs/:id', (request, response) => {
   const job = getJob(request.params.id);
   response.status(job ? 200 : 404).json(job || { error: 'Job nao encontrado.' });
 });
-app.post('/api/jobs', (request, response, next) => {
+app.post('/api/jobs', async (request, response, next) => {
   try {
     const type = request.body?.type as JobType;
-    if (!['train', 'validate', 'predict', 'tune'].includes(type)) {
+    if (!['train', 'validate', 'predict', 'tune', 'dataset', 'drive', 'drive-pull'].includes(type)) {
       return response.status(400).json({ error: 'Tipo de operacao invalido.' });
     }
-    response.status(202).json(createJob(type, request.body?.options || {}));
+    response.status(202).json(await createJob(type, request.body?.options || {}));
   } catch (error) {
     next(error);
   }
@@ -133,6 +157,22 @@ app.get('/api/jobs-stream', (request, response) => {
   jobEvents.on('update', listener);
   request.on('close', () => jobEvents.off('update', listener));
 });
+
+app.get('/api/publication/plan', async (_request, response, next) => {
+  try { response.json(await publicationPlan()); } catch (error) { next(error); }
+});
+
+app.post('/api/publication/publish', async (request, response, next) => {
+  try {
+    const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String) : [];
+    const publication = await publishDrafts(keys);
+    const rebuild = request.body?.rebuild !== false;
+    const job = rebuild ? await createJob('dataset', {}) : null;
+    response.json({ ...publication, job });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/drive/status', async (_request, response) => response.json(await driveStatus()));
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   const message = error instanceof Error ? error.message : 'Erro inesperado.';

@@ -50,6 +50,13 @@ export type Overview = {
   models: Model[];
   predictions: Prediction[];
   thresholds: Array<Record<string, string | number>>;
+  drive: {
+    configured: boolean;
+    connected: boolean;
+    remote: string | null;
+    projectRoot: string | null;
+    error?: string;
+  };
 };
 
 export type AnnotationSummary = {
@@ -82,7 +89,7 @@ export type Annotation = {
 
 export type Job = {
   id: string;
-  type: 'train' | 'validate' | 'predict' | 'tune';
+  type: 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   startedAt?: string;
@@ -90,4 +97,23 @@ export type Job = {
   logs: string[];
   command: string[];
   exitCode?: number | null;
+};
+
+export type AuthStatus = {
+  enabled: boolean;
+  authenticated: boolean;
+  username: string | null;
+};
+
+export type PublicationChange = {
+  key: string;
+  image: string;
+  trap: string | null;
+  boxesBefore: number;
+  boxesAfter: number;
+  reviewedBefore: boolean;
+  reviewedAfter: boolean;
+  excludedBefore: boolean;
+  excludedAfter: boolean;
+  changed: boolean;
 };
