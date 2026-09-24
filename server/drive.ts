@@ -132,13 +132,26 @@ export async function backupDraft(localFile: string) {
 
 export async function backupPublishedAnnotation(localFile: string) {
   const installation = await discoverDrive();
-  if (!installation) return;
+  if (!installation) return false;
   await rclone([
     'copyto',
     localFile,
     `${remoteProjectRoot(installation)}/annotations/${path.basename(localFile)}`,
     '--checksum',
   ]);
+  return true;
+}
+
+export async function backupPublishedImage(localFile: string) {
+  const installation = await discoverDrive();
+  if (!installation) return false;
+  await rclone([
+    'copyto',
+    localFile,
+    `${remoteProjectRoot(installation)}/images/${path.basename(localFile)}`,
+    '--checksum',
+  ]);
+  return true;
 }
 
 export async function syncDatasetToDrive() {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Bug,
@@ -212,12 +212,42 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
   const viewport = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const zoomAnchor = useRef<{ x: number; y: number; imageX: number; imageY: number } | null>(null);
+  const zoomAt = (factor: number, x?: number, y?: number) => {
+    const element = viewport.current;
+    const img = image.current;
+    if (!element || !img) return;
+    const bounds = element.getBoundingClientRect();
+    const imageBounds = img.getBoundingClientRect();
+    const cursorX = x ?? bounds.left + bounds.width / 2;
+    const cursorY = y ?? bounds.top + bounds.height / 2;
+    zoomAnchor.current = {
+      x: cursorX, y: cursorY,
+      imageX: Math.max(0, Math.min(1, (cursorX - imageBounds.left) / imageBounds.width)),
+      imageY: Math.max(0, Math.min(1, (cursorY - imageBounds.top) / imageBounds.height)),
+    };
+    setZoom((value) => {
+      const next = Math.max(1, Math.min(6, value * factor));
+      if (next === value) zoomAnchor.current = null;
+      return next;
+    });
+  };
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current;
+    const element = viewport.current;
+    const img = image.current;
+    if (!anchor || !element || !img) return;
+    const bounds = img.getBoundingClientRect();
+    element.scrollLeft += bounds.left + anchor.imageX * bounds.width - anchor.x;
+    element.scrollTop += bounds.top + anchor.imageY * bounds.height - anchor.y;
+    zoomAnchor.current = null;
+  }, [zoom, fitWidth]);
   useEffect(() => {
     const element = viewport.current;
     if (!element) return;
     const wheel = (event: WheelEvent) => {
       event.preventDefault(); event.stopPropagation();
-      setZoom((value) => Math.max(1, Math.min(6, value * Math.exp(-event.deltaY * 0.001))));
+      zoomAt(Math.exp(-event.deltaY * 0.001), event.clientX, event.clientY);
     };
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
     element.addEventListener('wheel', wheel, { passive: false });
@@ -238,7 +268,7 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
     return () => observer.disconnect();
   }, []);
   return <div className="prediction-viewer" role="dialog" aria-modal="true" aria-label={`Predição ${file}`}>
-    <div className="prediction-viewer-toolbar"><strong>{file}</strong><div><button className="icon-button" aria-label="Diminuir zoom" onClick={() => setZoom((value) => Math.max(1, value / 1.4))}><Minus /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="Aumentar zoom" onClick={() => setZoom((value) => Math.min(6, value * 1.4))}><Plus /></button><button className="icon-button" aria-label="Fechar imagem" onClick={onClose}><X /></button></div></div>
+    <div className="prediction-viewer-toolbar"><strong>{file}</strong><div><button className="icon-button" aria-label="Diminuir zoom" onClick={() => zoomAt(1 / 1.4)}><Minus /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="Aumentar zoom" onClick={() => zoomAt(1.4)}><Plus /></button><button className="icon-button" aria-label="Fechar imagem" onClick={onClose}><X /></button></div></div>
     <div className="prediction-viewer-image" ref={viewport} onPointerDown={(event) => { if (event.pointerType !== 'mouse') return; event.currentTarget.setPointerCapture(event.pointerId); drag.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; }} onPointerMove={(event) => { if (!drag.current) return; event.currentTarget.scrollLeft = drag.current.left - (event.clientX - drag.current.x); event.currentTarget.scrollTop = drag.current.top - (event.clientY - drag.current.y); }} onPointerUp={() => { drag.current = null; }}><img ref={image} onLoad={() => { const element = viewport.current; const img = image.current; if (element && img) setFitWidth(Math.min(element.clientWidth / img.naturalWidth, element.clientHeight / img.naturalHeight) * img.naturalWidth); }} src={`/api/predictions/${encodeURIComponent(group)}/${encodeURIComponent(file)}`} alt={`Predição ${file}`} style={{ width: fitWidth ? `${fitWidth * zoom}px` : 'auto' }} /></div>
   </div>;
 }
@@ -302,6 +332,7 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState('');
+  const [publicationWarning, setPublicationWarning] = useState(false);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -314,25 +345,29 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
   useEffect(() => { void refresh(); }, [refresh]);
   const changed = plan.filter((item) => item.changed);
   const publish = async () => {
-    setPublishing(true); setMessage('');
+    setPublishing(true); setMessage(''); setPublicationWarning(false);
     try {
       const result = await api.publishDrafts(selected, true);
-      setMessage(`${result.published.length} anotação(ões) publicadas. A reconstrução YOLO foi iniciada.`);
+      const backup = result.driveErrors.length
+        ? `Backup no Drive incompleto (${result.driveBackedUp}/${result.published.length}); confira a conexão e use “Fazer backup agora”.`
+        : `Backup das anotações e imagens confirmado no Drive (${result.driveBackedUp}/${result.published.length}).`;
+      setPublicationWarning(Boolean(result.driveErrors.length));
+      setMessage(`${result.published.length} anotação(ões) publicadas, ${result.imagesAdded.length} imagem(ns) adicionadas ao FarmGuard. Reconstrução YOLO ${result.job ? 'iniciada' : 'não iniciada'}. ${backup}`);
       await refresh(); await onUpdated();
-    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha na publicação.'); }
+    } catch (cause) { setPublicationWarning(true); setMessage(cause instanceof Error ? cause.message : 'Falha na publicação.'); }
     finally { setPublishing(false); }
   };
   return <section className="publish-grid">
     <article className="panel drive-card">
       <div className="panel-head"><div><span className="eyebrow">Google Drive</span><h2>Backup do dataset fonte</h2></div><StatusPill tone={data.drive.connected ? 'success' : 'danger'}>{data.drive.connected ? 'Conectado' : 'Indisponível'}</StatusPill></div>
       <div className="drive-visual"><Cloud /><div><strong>{data.drive.remote || 'Sem remote'}</strong><span>{data.drive.projectRoot || 'Configure o rclone para habilitar.'}</span></div></div>
-      <p>Rascunhos são enviados para <code>studio-drafts</code>. Após a publicação, os JSONs canônicos também são atualizados no Drive.</p>
+      <p>Rascunhos são enviados para <code>studio-drafts</code>. Na publicação, o Studio copia a imagem e o JSON para o FarmGuard e confirma o backup de ambos no Drive antes de responder.</p>
       <div className="drive-actions"><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive-pull', {}).then(onUpdated)}><Cloud />Importar novos arquivos</button><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive', {}).then(onUpdated)}><UploadCloud />Fazer backup agora</button></div>
     </article>
     <article className="panel publication-card">
       <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard → YOLO</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
       {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => <label key={item.key}><input type="checkbox" checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><span><strong>{item.trap || item.image}</strong><small>{item.boxesBefore} → {item.boxesAfter} boxes{item.excludedBefore !== item.excludedAfter ? ` · ${item.excludedAfter ? 'excluir' : 'restaurar'}` : ''}</small></span></label>)}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
-      {message && <div className={message.includes('publicadas') ? 'inline-success' : 'inline-error'}>{message}</div>}
+      {message && <div className={publicationWarning ? 'inline-error' : 'inline-success'}>{message}</div>}
       <button className="primary-button full" disabled={!selected.length || publishing} onClick={() => void publish()}><UploadCloud />{publishing ? 'Publicando…' : 'Publicar e reconstruir DatasetYolo'}</button>
     </article>
   </section>;

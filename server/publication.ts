@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { backupPublishedAnnotation } from './drive.js';
+import { backupPublishedAnnotation, backupPublishedImage } from './drive.js';
 import { config, farmPaths } from './config.js';
 import type { Annotation } from './farmguard.js';
+import { imageFor, sourceImage } from './annotation-source.js';
 
 export type PublicationChange = {
   key: string;
@@ -73,28 +74,62 @@ export async function publishDrafts(keys: string[]) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupRoot = path.join(config.dataRoot, 'publication-backups', timestamp);
   await fs.mkdir(backupRoot, { recursive: true });
-  const published: string[] = [];
+  const entries: Array<{ key: string; fileName: string; contents: string; targetPath: string; imagePath: string; sourcePath: string | null }> = [];
   for (const key of selected) {
     if (!/^[a-zA-Z0-9_-]+$/.test(key)) continue;
     const fileName = `${key}.json`;
     const draftPath = path.join(config.dataRoot, 'annotation-drafts', fileName);
-    const targetPath = path.join(farmPaths.annotationRoot, 'annotations', fileName);
     if (!(await exists(draftPath))) continue;
-    if (await exists(targetPath)) await fs.copyFile(targetPath, path.join(backupRoot, fileName));
     const contents = await fs.readFile(draftPath, 'utf8');
-    JSON.parse(contents);
-    const tempPath = `${targetPath}.${crypto.randomUUID()}.tmp`;
-    await fs.writeFile(tempPath, contents, 'utf8');
-    await fs.rename(tempPath, targetPath);
-    published.push(key);
-    void backupPublishedAnnotation(targetPath).catch((error) =>
-      console.error('Falha ao enviar anotacao publicada ao Drive:', error),
-    );
+    const draft = JSON.parse(contents) as Annotation;
+    if (draft.key !== key || !draft.image || path.basename(draft.image) !== draft.image || !/\.(jpe?g|png|webp)$/i.test(draft.image)) {
+      throw new Error(`Imagem inválida no rascunho ${key}.`);
+    }
+    const imagePath = path.join(farmPaths.annotationRoot, 'images', draft.image);
+    let sourcePath: string | null = null;
+    if (!(await exists(imagePath))) {
+      const source = await sourceImage(key);
+      if (!source || source.image !== draft.image) throw new Error(`Imagem ${draft.image} indisponível para publicação.`);
+      sourcePath = await imageFor(source);
+    }
+    entries.push({ key, fileName, contents, targetPath: path.join(farmPaths.annotationRoot, 'annotations', fileName), imagePath, sourcePath });
+  }
+  const published: string[] = [];
+  const imagesAdded: string[] = [];
+  for (const entry of entries) {
+    if (entry.sourcePath && !(await exists(entry.imagePath))) {
+      const imageTemp = `${entry.imagePath}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fs.copyFile(entry.sourcePath, imageTemp);
+        await fs.rename(imageTemp, entry.imagePath);
+      } finally { await fs.rm(imageTemp, { force: true }); }
+      imagesAdded.push(path.basename(entry.imagePath));
+    }
+    if (await exists(entry.targetPath)) await fs.copyFile(entry.targetPath, path.join(backupRoot, entry.fileName));
+    const tempPath = `${entry.targetPath}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(tempPath, entry.contents, 'utf8');
+      await fs.rename(tempPath, entry.targetPath);
+    } finally { await fs.rm(tempPath, { force: true }); }
+    published.push(entry.key);
+  }
+  const driveErrors: string[] = [];
+  let driveBackedUp = 0;
+  for (const entry of entries.filter((item) => published.includes(item.key))) {
+    try {
+      const [annotationSaved, imageSaved] = await Promise.all([
+        backupPublishedAnnotation(entry.targetPath), backupPublishedImage(entry.imagePath),
+      ]);
+      if (annotationSaved && imageSaved) driveBackedUp += 1;
+      else driveErrors.push(`${entry.key}: Google Drive não configurado.`);
+    } catch (error) {
+      driveErrors.push(`${entry.key}: ${error instanceof Error ? error.message : 'falha no Drive'}`);
+    }
   }
   await fs.writeFile(
     path.join(backupRoot, 'manifest.json'),
-    `${JSON.stringify({ publishedAt: new Date().toISOString(), published }, null, 2)}\n`,
+    `${JSON.stringify({ publishedAt: new Date().toISOString(), published, imagesAdded, driveBackedUp, driveErrors }, null, 2)}\n`,
     'utf8',
   );
-  return { published, backupRoot };
+  return { published, imagesAdded, driveBackedUp, driveErrors, backupRoot };
 }

@@ -14,7 +14,7 @@ O Studio é um repositório independente. Por padrão, ele acessa o FarmGuard so
 - central de operações para `train.py`, `val.py`, `predict.py` e `tune_thresholds.py`;
 - reconstrução do `DatasetYolo` e backup do dataset fonte no Google Drive;
 - anotador web com fila priorizada como no Flutter, filtros por revisão, criação e edição de boxes, zoom sem rolar a página, gesto de dois dedos, desfazer/refazer e conclusão com avanço para a próxima pendente;
-- publicação controlada de rascunhos, com diff, backup local e reconstrução do YOLO;
+- publicação controlada de rascunhos, com diff, cópia da imagem e do JSON para o FarmGuard, backup local/Drive e reconstrução do YOLO;
 - autenticação por sessão, limitação de tentativas e cookies seguros para acesso remoto.
 - aplicativo instalável na Tela de Início do iPhone, com interface ajustada para toque e tela segura;
 - sessões preservadas por sete dias mesmo após reiniciar o servidor.
@@ -56,7 +56,7 @@ Para listar também as imagens sem JSON de anotação, o Studio lê `data/source
 
 **Predizer** usa o modelo escolhido no conjunto atual `DatasetYolo/images/val`, gerando imagens com boxes em `Iazinha/Training/predictions`. Portanto ele não usa automaticamente todas as fotos revisadas: a divisão de validação depende da última geração do DatasetYolo. O nome do lote é opcional; quando vazio, o Studio cria um identificador com data/hora para evitar sobrescrever uma galeria anterior.
 
-“Importar novos arquivos” usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. “Fazer backup agora” envia o estado local de forma não destrutiva.
+"Importar novos arquivos" usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. "Fazer backup agora" envia o estado local de forma não destrutiva. Ao publicar um rascunho, o Studio garante que a imagem também exista em `FarmGuard/.../traps_events/images`, copia o JSON canônico e confirma o backup dos dois arquivos no Drive. Se o Drive falhar, a publicação local permanece e a interface mostra o backup incompleto; a reconstrução YOLO é iniciada como tarefa separada, cujo resultado deve ser conferido no histórico de operações.
 
 ## Cloudflare Tunnel
 

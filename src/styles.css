@@ -245,7 +245,7 @@ td strong { color: var(--text); }
 .annotator-actions { display: flex; gap: 8px; }
 .file-upload { display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .file-upload input { display: none; }
-.annotator-layout { display: grid; grid-template-columns: 255px minmax(0, 1fr); gap: 12px; min-height: 700px; }
+.annotator-layout { display: grid; grid-template-columns: 255px minmax(0, 1fr); gap: 12px; height: clamp(620px, 84vh, 1020px); align-items: stretch; }
 .annotation-queue { padding: 13px; margin: 0; min-height: 0; display: flex; flex-direction: column; }
 .queue-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 3px 12px; }
 .queue-head h2 { font-size: 17px; }
@@ -254,7 +254,7 @@ td strong { color: var(--text); }
 .annotation-queue select { width: 100%; color: var(--text); background: #080f0c; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
 .queue-prioritize { min-height: 34px; margin-bottom: 9px; border: 1px solid var(--line); border-radius: 7px; background: #0b1812; color: var(--mint); cursor: pointer; font-size: 11px; font-weight: 700; }
 .queue-prioritize:disabled { opacity: .45; cursor: not-allowed; }
-.queue-list { display: grid; gap: 5px; overflow: auto; max-height: 680px; padding-right: 3px; }
+.queue-list { display: grid; align-content: start; gap: 5px; overflow: auto; flex: 1; min-height: 0; padding-right: 3px; }
 .queue-list button { width: 100%; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 6px; text-align: left; cursor: pointer; }
 .queue-list button:hover { background: #ffffff08; }
 .queue-list button.active { background: var(--surface-3); border-color: #3b5548; }
@@ -265,12 +265,13 @@ td strong { color: var(--text); }
 .queue-list strong, .queue-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-list strong { font-size: 11px; }
 .queue-list small { color: var(--muted); font-size: 9px; margin-top: 4px; }
-.annotation-workspace { background: #070c0a; border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; min-width: 0; }
+.annotation-workspace { background: #070c0a; border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .annotation-toolbar { min-height: 58px; padding: 9px 13px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line-soft); background: #0d1713; }
 .annotation-toolbar > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .annotation-toolbar strong { font-size: 12px; }
 .annotation-toolbar span:not(.status-pill) { color: var(--muted); font-size: 11px; }
-.canvas-shell { position: relative; height: min(64vh, 820px); background: #030605; overflow: hidden; }
+.canvas-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.canvas-shell { position: relative; flex: 1; min-height: 0; background: #030605; overflow: hidden; }
 .canvas-shell canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 .canvas-tools { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; background: #0d1713; border-bottom: 1px solid var(--line-soft); }
 .canvas-modes, .canvas-zoom { display: flex; gap: 5px; }
@@ -315,10 +316,10 @@ td strong { color: var(--text); }
   .page-title .primary-button { width: 100%; }
   .annotator-actions { width: 100%; }
   .annotator-actions button { flex: 1; }
-  .annotator-layout { grid-template-columns: 1fr; }
+  .annotator-layout { grid-template-columns: 1fr; height: auto; }
   .annotation-queue { max-height: 260px; }
   .queue-list { max-height: 160px; }
-  .canvas-shell { height: min(58dvh, 600px); }
+  .canvas-shell { flex: none; height: min(58dvh, 600px); }
   .canvas-hint { display: none; }
   .gallery-grid { grid-template-columns: repeat(2, 1fr); }
 }
