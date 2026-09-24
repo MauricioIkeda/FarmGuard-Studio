@@ -110,6 +110,7 @@ export type PublicationChange = {
   key: string;
   image: string;
   trap: string | null;
+  publishedBefore: boolean;
   boxesBefore: number;
   boxesAfter: number;
   reviewedBefore: boolean;

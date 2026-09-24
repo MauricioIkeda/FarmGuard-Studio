@@ -10,6 +10,7 @@ export type PublicationChange = {
   key: string;
   image: string;
   trap: string | null;
+  publishedBefore: boolean;
   boxesBefore: number;
   boxesAfter: number;
   reviewedBefore: boolean;
@@ -53,6 +54,7 @@ export async function publicationPlan(): Promise<PublicationChange[]> {
       key: draft.key,
       image: draft.image,
       trap: String(draft.source?.metadata?.trap_code || '') || null,
+      publishedBefore: Boolean(original),
       boxesBefore: original?.boxes.length || 0,
       boxesAfter: draft.boxes.length,
       reviewedBefore: original?.reviewed || false,

@@ -227,12 +227,21 @@ td strong { color: var(--text); }
 .full-width { width: 100%; }
 .drive-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .drive-actions button { white-space: normal; min-height: 48px; }
+.publication-help { margin: 0 0 13px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .publication-list { display: grid; gap: 6px; max-height: 235px; overflow: auto; padding-right: 3px; }
-.publication-list label { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 9px; background: #08110d; border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 11px; cursor: pointer; }
+.publication-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) 16px; align-items: center; gap: 9px; background: #08110d; border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 11px; }
+.publication-item:hover { border-color: #3b5548; }
+.publication-item > svg { color: var(--muted); }
+.publication-open { display: block; min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.publication-item-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.publication-kind { flex: 0 0 auto; padding: 4px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+.publication-kind.danger { color: #ffb9ba; background: #ff6e701a; }
+.publication-kind.success { color: var(--mint); background: #73ebc61a; }
+.publication-kind.warning { color: var(--amber); background: #ffbd521a; }
 .publication-list input { accent-color: var(--lime); width: 16px; height: 16px; }
 .publication-list strong, .publication-list small { display: block; }
-.publication-list strong { font-size: 12px; }
-.publication-list small { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.publication-list strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.publication-list small { color: var(--muted); font-size: 10px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .publication-rebuild-option { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; cursor: pointer; color: var(--text); font-size: 12px; }
 .publication-rebuild-option input { accent-color: var(--lime); width: 16px; height: 16px; flex: 0 0 auto; margin: 1px 0 0; }
 .publication-rebuild-option small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }

@@ -56,6 +56,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function StudioApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<Page>('overview');
+  const [annotationTarget, setAnnotationTarget] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -76,7 +77,15 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
   useEffect(() => { void load(); }, [load]);
 
   const navigate = (next: Page) => {
+    setAnnotationTarget(null);
     setPage(next);
+    setMobileNav(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openAnnotation = (key: string) => {
+    setAnnotationTarget(key);
+    setPage('annotator');
     setMobileNav(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -117,8 +126,8 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           {loading && !overview ? <div className="loading-page"><LoaderCircle className="spin" />Lendo o laboratório…</div> : null}
           {overview && page === 'overview' && <OverviewPage data={overview} onNavigate={navigate} />}
           {overview && page === 'experiments' && <ExperimentsPage data={overview} />}
-          {overview && page === 'operations' && <OperationsPage data={overview} onRefresh={load} />}
-          {page === 'annotator' && <AnnotatorPage onSaved={load} />}
+          {overview && page === 'operations' && <OperationsPage data={overview} onRefresh={load} onOpenAnnotation={openAnnotation} />}
+          {page === 'annotator' && <AnnotatorPage onSaved={load} targetKey={annotationTarget} />}
         </div>
       </main>
     </div>
@@ -273,7 +282,7 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
   </div>;
 }
 
-function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => Promise<void> }) {
+function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview; onRefresh: () => Promise<void>; onOpenAnnotation: (key: string) => void }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [type, setType] = useState<Job['type']>('validate');
   const [model, setModel] = useState(data.models[0]?.path || '');
@@ -322,11 +331,18 @@ function OperationsPage({ data, onRefresh }: { data: Overview; onRefresh: () => 
       </article>
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">Sessão atual</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} onClick={() => setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada nesta sessão.</Empty>}</section>
-    <PublicationPanel data={data} onUpdated={async () => { await loadJobs(); await onRefresh(); }} />
+    <PublicationPanel data={data} onUpdated={async () => { await loadJobs(); await onRefresh(); }} onOpenAnnotation={onOpenAnnotation} />
   </>;
 }
 
-function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () => Promise<void> }) {
+function publicationKind(item: PublicationChange) {
+  if (item.excludedAfter && !item.excludedBefore) return { label: 'Exclusão', tone: 'danger' };
+  if (item.excludedBefore && !item.excludedAfter) return { label: 'Restauração', tone: 'success' };
+  if (!item.publishedBefore) return { label: 'Adição', tone: 'success' };
+  return { label: 'Atualização', tone: 'warning' };
+}
+
+function PublicationPanel({ data, onUpdated, onOpenAnnotation }: { data: Overview; onUpdated: () => Promise<void>; onOpenAnnotation: (key: string) => void }) {
   const [plan, setPlan] = useState<PublicationChange[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -367,7 +383,8 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
     </article>
     <article className="panel publication-card">
       <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
-      {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => <label key={item.key}><input type="checkbox" checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><span><strong>{item.trap || item.image}</strong><small>{item.boxesBefore} → {item.boxesAfter} boxes{item.excludedBefore !== item.excludedAfter ? ` · ${item.excludedAfter ? 'excluir' : 'restaurar'}` : ''}</small></span></label>)}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
+      <p className="publication-help">Clique numa imagem para conferir ou restaurar no anotador. Publicar uma exclusão marca o JSON como excluído; não apaga a foto original. Ela sai do YOLO na próxima reconstrução.</p>
+      {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => { const kind = publicationKind(item); return <div className="publication-item" key={item.key}><input type="checkbox" aria-label={`Selecionar ${item.image} para publicação`} checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><button type="button" className="publication-open" onClick={() => onOpenAnnotation(item.key)} title={`Abrir ${item.image} no anotador`}><span className="publication-item-title"><strong>{item.trap || item.image}</strong><span className={`publication-kind ${kind.tone}`}>{kind.label}</span></span><small>{item.image} · {item.boxesBefore} → {item.boxesAfter} boxes{item.excludedAfter ? ' · ficará fora do YOLO' : item.reviewedAfter ? ' · revisada' : ' · pendente de revisão'}</small></button><ChevronRight size={16} aria-hidden="true" /></div>; })}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
       {message && <div className={publicationWarning ? 'inline-error' : 'inline-success'}>{message}</div>}
       <label className="publication-rebuild-option"><input type="checkbox" checked={rebuildAfterPublish} onChange={(event) => setRebuildAfterPublish(event.target.checked)} disabled={publishing} /><span>Reconstruir DatasetYolo logo após publicar<small>Desmarcado: publica e faz backup sem alterar o dataset YOLO. Você pode gerar o YOLO mais tarde em Operações.</small></span></label>
       <button className="primary-button full" disabled={!selected.length || publishing} onClick={() => void publish()}><UploadCloud />{publishing ? 'Publicando…' : rebuildAfterPublish ? 'Publicar, fazer backup e gerar YOLO' : 'Publicar e fazer backup'}</button>
@@ -375,9 +392,10 @@ function PublicationPanel({ data, onUpdated }: { data: Overview; onUpdated: () =
   </section>;
 }
 
-function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
+function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; targetKey: string | null }) {
   const [list, setList] = useState<AnnotationSummary[]>([]);
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(targetKey ? -1 : 0);
+  const targetApplied = useRef(false);
   const [annotation, setAnnotation] = useState<Annotation | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [history, setHistory] = useState<Annotation['boxes'][]>([]);
@@ -392,7 +410,7 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
   const cancelSuggestionRef = useRef<HTMLButtonElement>(null);
   const currentAnnotationKey = useRef<string | null>(null);
   const [filter, setFilter] = useState('');
-  const [status, setStatus] = useState<'all' | 'pending' | 'reviewed' | 'excluded'>('pending');
+  const [status, setStatus] = useState<'all' | 'pending' | 'reviewed' | 'excluded'>(targetKey ? 'all' : 'pending');
   const [message, setMessage] = useState('');
   const [queueExpanded, setQueueExpanded] = useState(true);
   useEffect(() => {
@@ -414,6 +432,13 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
     return matchesStatus && (!query || item.trap?.toLocaleLowerCase().includes(query) || item.image.toLocaleLowerCase().includes(query));
   }), [list, filter, status]);
   useEffect(() => { api.annotations().then(setList).catch((error) => setMessage(error.message)); }, []);
+  useEffect(() => {
+    if (!targetKey || !list.length || targetApplied.current) return;
+    targetApplied.current = true;
+    const targetIndex = list.findIndex((item) => item.key === targetKey);
+    if (targetIndex >= 0) setIndex(targetIndex);
+    else setMessage('A imagem selecionada não foi encontrada na fila do anotador.');
+  }, [list, targetKey]);
   const activeKey = visible[index]?.key;
   currentAnnotationKey.current = activeKey || null;
   useEffect(() => {
@@ -584,7 +609,7 @@ function AnnotatorPage({ onSaved }: { onSaved: () => Promise<void> }) {
     {aiNotice && <div className="inline-success annotation-ai-notice"><Sparkles size={17} />{aiNotice}</div>}
     <section className="annotator-layout">
       <aside className={`annotation-queue panel ${queueExpanded ? '' : 'compact'}`}>
-        <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens · {index + 1} / {visible.length}</h2></div><button type="button" className="queue-toggle" aria-expanded={queueExpanded} onClick={() => setQueueExpanded((open) => !open)}>{queueExpanded ? 'Ocultar fila' : 'Escolher imagem'}</button></div>
+        <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens · {Math.max(0, index + 1)} / {visible.length}</h2></div><button type="button" className="queue-toggle" aria-expanded={queueExpanded} onClick={() => setQueueExpanded((open) => !open)}>{queueExpanded ? 'Ocultar fila' : 'Escolher imagem'}</button></div>
         <div className="queue-filters-mobile" aria-label="Filtrar imagens por estado">{([
           ['pending', 'Pendentes'], ['reviewed', 'Revisadas'], ['excluded', 'Excluídas'], ['all', 'Todas'],
         ] as const).map(([value, label]) => <button key={value} type="button" className={status === value ? 'active' : ''} aria-pressed={status === value} onClick={() => void changeStatus(value)}>{label}<span>{queueCounts[value]}</span></button>)}</div>

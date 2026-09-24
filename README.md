@@ -60,6 +60,8 @@ Para listar também as imagens sem JSON de anotação, o Studio lê `data/source
 
 "Importar novos arquivos" usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. "Fazer backup agora" envia o estado local de forma não destrutiva. Ao publicar um rascunho, o Studio garante que a imagem também exista em `FarmGuard/.../traps_events/images`, copia o JSON canônico e confirma o backup dos dois arquivos no Drive. Se o Drive falhar, a publicação local permanece e a interface mostra o backup incompleto. Por padrão, **Publicar e fazer backup** não reconstrói o DatasetYolo. Marque **Reconstruir DatasetYolo logo após publicar** para iniciá-lo na mesma ação, ou use **Operações → Gerar YOLO** mais tarde, sem repetir a anotação nem o backup. A reconstrução usa os arquivos publicados localmente no FarmGuard; para recuperá-los apenas do Drive, use **Importar novos arquivos** antes de gerar o YOLO. Confira a conclusão da tarefa no histórico de operações.
 
+O plano de publicação identifica **adição**, **atualização**, **exclusão** e **restauração**. Clique no item para abrir sua imagem no anotador, inclusive se estiver excluída. Publicar uma exclusão grava `excluded: true` no JSON; não apaga a foto ou o JSON. A imagem deixa de entrar no DatasetYolo quando ele for reconstruído, e pode ser restaurada depois.
+
 ## Cloudflare Tunnel
 
 Com o Studio em execução, o tunnel deve encaminhar o domínio escolhido para `http://localhost:4310`. Para um teste rápido:
