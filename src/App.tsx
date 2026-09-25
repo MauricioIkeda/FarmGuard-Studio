@@ -398,8 +398,10 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   const targetApplied = useRef(false);
   const [annotation, setAnnotation] = useState<Annotation | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [history, setHistory] = useState<Annotation['boxes'][]>([]);
-  const [future, setFuture] = useState<Annotation['boxes'][]>([]);
+  const [selectedIgnore, setSelectedIgnore] = useState<number | null>(null);
+  type Markings = Pick<Annotation, 'boxes' | 'ignore_regions'>;
+  const [history, setHistory] = useState<Markings[]>([]);
+  const [future, setFuture] = useState<Markings[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -447,7 +449,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     setAnnotation(null);
     api.annotation(activeKey).then((value) => {
       if (!active) return;
-      setAnnotation(value); setHistory([]); setFuture([]); setSelected(null); setDirty(false); setMessage(''); setAiNotice('');
+      setAnnotation(value); setHistory([]); setFuture([]); setSelected(null); setSelectedIgnore(null); setDirty(false); setMessage(''); setAiNotice('');
     }).catch((error) => { if (active) setMessage(error.message); });
     return () => { active = false; };
   }, [activeKey]);
@@ -497,20 +499,20 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   };
   const historyPoint = () => {
     if (!annotation) return;
-    setHistory((items) => [...items.slice(-39), annotation.boxes.map((box) => ({ ...box }))]);
+    setHistory((items) => [...items.slice(-39), { boxes: annotation.boxes.map((box) => ({ ...box })), ignore_regions: (annotation.ignore_regions || []).map((region) => ({ ...region })) }]);
     setFuture([]);
   };
   const undo = () => {
     if (!annotation || !history.length) return;
-    setFuture((items) => [...items, annotation.boxes.map((box) => ({ ...box }))]);
-    setAnnotation({ ...annotation, boxes: history.at(-1)! });
-    setHistory((items) => items.slice(0, -1)); setDirty(true); setSelected(null);
+    setFuture((items) => [...items, { boxes: annotation.boxes.map((box) => ({ ...box })), ignore_regions: (annotation.ignore_regions || []).map((region) => ({ ...region })) }]);
+    setAnnotation({ ...annotation, ...history.at(-1)! });
+    setHistory((items) => items.slice(0, -1)); setDirty(true); setSelected(null); setSelectedIgnore(null);
   };
   const redo = () => {
     if (!annotation || !future.length) return;
-    setHistory((items) => [...items, annotation.boxes.map((box) => ({ ...box }))]);
-    setAnnotation({ ...annotation, boxes: future.at(-1)! });
-    setFuture((items) => items.slice(0, -1)); setDirty(true); setSelected(null);
+    setHistory((items) => [...items, { boxes: annotation.boxes.map((box) => ({ ...box })), ignore_regions: (annotation.ignore_regions || []).map((region) => ({ ...region })) }]);
+    setAnnotation({ ...annotation, ...future.at(-1)! });
+    setFuture((items) => items.slice(0, -1)); setDirty(true); setSelected(null); setSelectedIgnore(null);
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -534,6 +536,11 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
         setAnnotation({ ...annotation, boxes: annotation.boxes.filter((_, boxIndex) => boxIndex !== selected) });
         setSelected(null); setDirty(true);
       }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIgnore !== null && !typing) {
+        historyPoint();
+        setAnnotation({ ...annotation, ignore_regions: (annotation.ignore_regions || []).filter((_, regionIndex) => regionIndex !== selectedIgnore) });
+        setSelectedIgnore(null); setDirty(true);
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void persist(annotation.reviewed); }
       if (!typing && event.key === 'ArrowLeft') void goTo(index - 1);
       if (!typing && event.key === 'ArrowRight') void goTo(index + 1);
@@ -542,6 +549,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     return () => window.removeEventListener('keydown', key);
   });
   const updateBoxes = (boxes: Annotation['boxes']) => { if (annotation) { setAnnotation({ ...annotation, boxes }); setDirty(true); } };
+  const updateIgnoreRegions = (ignore_regions: NonNullable<Annotation['ignore_regions']>) => { if (annotation) { setAnnotation({ ...annotation, ignore_regions }); setDirty(true); } };
   const finish = async () => {
     if (!annotation) return;
     const nextKey = [...visible.slice(index + 1), ...visible.slice(0, index)]
@@ -621,9 +629,9 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
       <div className="annotation-workspace">
         {aiBusy && <div className="annotation-ai-overlay"><LoaderCircle className="spin" />A IA está analisando a imagem…</div>}
         {annotation ? <>
-          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
-          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} selected={selected} onSelected={setSelected} onChange={updateBoxes} onHistoryPoint={historyPoint} />
-          <div className="annotation-bottom"><div><span>Box selecionada</span><strong>{selected === null ? 'Nenhuma' : `#${selected + 1}`}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
+          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes · {(annotation.ignore_regions || []).length} áreas incertas{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
+          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} ignoreRegions={annotation.ignore_regions || []} selected={selected} selectedIgnore={selectedIgnore} onSelected={setSelected} onSelectedIgnore={setSelectedIgnore} onChange={updateBoxes} onIgnoreChange={updateIgnoreRegions} onHistoryPoint={historyPoint} />
+          <div className="annotation-bottom"><div><span>Seleção</span><strong>{selectedIgnore !== null ? `Área incerta #${selectedIgnore + 1}` : selected !== null ? `Inseto #${selected + 1}` : 'Nenhuma'}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}{selectedIgnore !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateIgnoreRegions((annotation.ignore_regions || []).filter((_, regionIndex) => regionIndex !== selectedIgnore)); setSelectedIgnore(null); }}><Trash2 />Excluir área incerta</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
         </> : <div className="loading-page">{visible.length ? <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
       </div>
     </section>

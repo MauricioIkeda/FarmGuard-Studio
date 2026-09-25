@@ -192,7 +192,7 @@ if (process.env.NODE_ENV === 'production') {
   app.use(vite.middlewares);
 }
 
-app.listen(config.port, '0.0.0.0', () => {
+app.listen(config.port, config.host, () => {
   console.log(`FarmGuard Studio em http://localhost:${config.port}`);
   console.log(`FarmGuard: ${config.farmGuardRoot}`);
   console.log(`Operacoes: ${config.allowFarmGuardJobs ? 'habilitadas' : 'bloqueadas'}`);

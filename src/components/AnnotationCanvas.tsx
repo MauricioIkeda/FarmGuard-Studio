@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hand, Maximize, Minus, Pencil, Plus } from 'lucide-react';
+import { Hand, Maximize, Minus, Pencil, Plus, Scan } from 'lucide-react';
 import type { Box } from '../types';
 
 type Props = {
@@ -7,27 +7,35 @@ type Props = {
   imageWidth: number;
   imageHeight: number;
   boxes: Box[];
+  ignoreRegions: Box[];
   selected: number | null;
+  selectedIgnore: number | null;
   onSelected: (index: number | null) => void;
+  onSelectedIgnore: (index: number | null) => void;
   onChange: (boxes: Box[]) => void;
+  onIgnoreChange: (regions: Box[]) => void;
   onHistoryPoint: () => void;
 };
 
 type Point = { x: number; y: number };
 type Gesture =
-  | { type: 'draw'; start: Point; current: Point }
+  | { type: 'draw'; start: Point; current: Point; kind: 'box' | 'ignore' }
   | { type: 'pan'; start: Point; originX: number; originY: number }
-  | { type: 'move'; start: Point; original: Box; index: number }
-  | { type: 'resize'; start: Point; original: Box; index: number };
+  | { type: 'move'; start: Point; original: Box; index: number; kind: 'box' | 'ignore' }
+  | { type: 'resize'; start: Point; original: Box; index: number; kind: 'box' | 'ignore' };
 
 export function AnnotationCanvas({
   imageUrl,
   imageWidth,
   imageHeight,
   boxes,
+  ignoreRegions,
   selected,
+  selectedIgnore,
   onSelected,
+  onSelectedIgnore,
   onChange,
+  onIgnoreChange,
   onHistoryPoint,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,7 +45,7 @@ export function AnnotationCanvas({
   const [view, setView] = useState({ scale: 0.25, x: 20, y: 20 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
-  const [mode, setMode] = useState<'draw' | 'pan'>(() => window.matchMedia('(pointer: coarse)').matches ? 'pan' : 'draw');
+  const [mode, setMode] = useState<'draw' | 'ignore' | 'pan'>(() => window.matchMedia('(pointer: coarse)').matches ? 'pan' : 'draw');
   const pointers = useRef(new Map<number, Point>());
   const pinch = useRef<{ distance: number; scale: number; anchor: Point } | null>(null);
   const gestureEdited = useRef(false);
@@ -118,16 +126,28 @@ export function AnnotationCanvas({
         context.fillRect(box.x + box.width - size / 2, box.y + box.height - size / 2, size, size);
       }
     });
+    ignoreRegions.forEach((region, index) => {
+      context.fillStyle = 'rgba(244, 83, 83, 0.23)';
+      context.fillRect(region.x, region.y, region.width, region.height);
+      context.strokeStyle = index === selectedIgnore ? '#ffd36e' : '#ff6666';
+      context.lineWidth = (index === selectedIgnore ? 4 : 2) / view.scale;
+      context.strokeRect(region.x, region.y, region.width, region.height);
+      if (index === selectedIgnore) {
+        const size = 12 / view.scale;
+        context.fillStyle = '#ffd36e';
+        context.fillRect(region.x + region.width - size / 2, region.y + region.height - size / 2, size, size);
+      }
+    });
     if (gesture?.type === 'draw') {
       const left = Math.min(gesture.start.x, gesture.current.x);
       const top = Math.min(gesture.start.y, gesture.current.y);
       context.setLineDash([10 / view.scale, 7 / view.scale]);
-      context.strokeStyle = '#b9f35a';
+      context.strokeStyle = gesture.kind === 'ignore' ? '#ff6666' : '#b9f35a';
       context.lineWidth = 3 / view.scale;
       context.strokeRect(left, top, Math.abs(gesture.current.x - gesture.start.x), Math.abs(gesture.current.y - gesture.start.y));
     }
     context.restore();
-  }, [boxes, selected, view, gesture, imageWidth, imageHeight, canvasSize]);
+  }, [boxes, ignoreRegions, selected, selectedIgnore, view, gesture, imageWidth, imageHeight, canvasSize]);
 
   const point = (
     event: React.PointerEvent<HTMLCanvasElement> | React.WheelEvent<HTMLCanvasElement>,
@@ -164,9 +184,9 @@ export function AnnotationCanvas({
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, [canvasSize]);
 
-  const hitIndex = (imagePoint: Point) => {
-    for (let index = boxes.length - 1; index >= 0; index -= 1) {
-      const box = boxes[index];
+  const hitIndex = (imagePoint: Point, items: Box[]) => {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const box = items[index];
       if (
         imagePoint.x >= box.x && imagePoint.x <= box.x + box.width &&
         imagePoint.y >= box.y && imagePoint.y <= box.y + box.height
@@ -194,16 +214,19 @@ export function AnnotationCanvas({
       setGesture({ type: 'pan', start: screen, originX: view.x, originY: view.y });
       return;
     }
-    const hit = hitIndex(image);
+    const kind = mode === 'ignore' ? 'ignore' : 'box';
+    const items = kind === 'ignore' ? ignoreRegions : boxes;
+    const hit = hitIndex(image, items);
     if (hit !== null) {
-      onSelected(hit);
-      const box = boxes[hit];
+      if (kind === 'ignore') { onSelectedIgnore(hit); onSelected(null); }
+      else { onSelected(hit); onSelectedIgnore(null); }
+      const box = items[hit];
       const handle = Math.hypot(image.x - (box.x + box.width), image.y - (box.y + box.height)) < (event.pointerType === 'touch' ? 34 : 22) / view.scale;
-      setGesture({ type: handle ? 'resize' : 'move', start: image, original: { ...box }, index: hit });
+      setGesture({ type: handle ? 'resize' : 'move', start: image, original: { ...box }, index: hit, kind });
       return;
     }
-    onSelected(null);
-    setGesture({ type: 'draw', start: image, current: image });
+    onSelected(null); onSelectedIgnore(null);
+    setGesture({ type: 'draw', start: image, current: image, kind });
   };
 
   const pointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -229,7 +252,7 @@ export function AnnotationCanvas({
     }
     const dx = image.x - gesture.start.x;
     const dy = image.y - gesture.start.y;
-    const updated = [...boxes];
+    const updated = [...(gesture.kind === 'ignore' ? ignoreRegions : boxes)];
     if (!gestureEdited.current) { onHistoryPoint(); gestureEdited.current = true; }
     if (gesture.type === 'move') {
       updated[gesture.index] = {
@@ -244,7 +267,8 @@ export function AnnotationCanvas({
         height: Math.max(4, Math.min(imageHeight - gesture.original.y, gesture.original.height + dy)),
       };
     }
-    onChange(updated);
+    if (gesture.kind === 'ignore') onIgnoreChange(updated);
+    else onChange(updated);
   };
 
   const pointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -261,8 +285,13 @@ export function AnnotationCanvas({
       const height = Math.min(imageHeight - y, Math.abs(gesture.current.y - gesture.start.y));
       if (width >= 4 && height >= 4) {
         onHistoryPoint();
-        onChange([...boxes, { x, y, width, height }]);
-        onSelected(boxes.length);
+        if (gesture.kind === 'ignore') {
+          onIgnoreChange([...ignoreRegions, { x, y, width, height }]);
+          onSelectedIgnore(ignoreRegions.length); onSelected(null);
+        } else {
+          onChange([...boxes, { x, y, width, height }]);
+          onSelected(boxes.length); onSelectedIgnore(null);
+        }
       }
     }
     setGesture(null);
@@ -273,6 +302,7 @@ export function AnnotationCanvas({
       <div className="canvas-tools" aria-label="Ferramentas de anotação">
         <div className="canvas-modes">
           <button type="button" className={mode === 'draw' ? 'active' : ''} aria-pressed={mode === 'draw'} onClick={() => setMode('draw')}><Pencil size={17} />Marcar</button>
+          <button type="button" className={mode === 'ignore' ? 'active' : ''} aria-pressed={mode === 'ignore'} onClick={() => setMode('ignore')}><Scan size={17} />Ignorar área</button>
           <button type="button" className={mode === 'pan' ? 'active' : ''} aria-pressed={mode === 'pan'} onClick={() => setMode('pan')}><Hand size={17} />Mover</button>
         </div>
         <div className="canvas-zoom">
@@ -294,7 +324,7 @@ export function AnnotationCanvas({
         onPointerCancel={(event) => { pointers.current.delete(event.pointerId); pinch.current = null; setGesture(null); }}
       />
       </div>
-      <div className="canvas-instructions">No celular, Mover evita boxes acidentais. Toque em Marcar para desenhar com um dedo; dois dedos aproximam e arrastam.</div>
+      <div className="canvas-instructions">Verde: insetos identificados. Vermelho: área incerta, sem penalidade no treino experimental. No celular, escolha Marcar ou Ignorar área para desenhar com um dedo; dois dedos aproximam e arrastam.</div>
     </div>
   );
 }

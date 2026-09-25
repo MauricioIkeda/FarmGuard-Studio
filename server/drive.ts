@@ -46,6 +46,7 @@ async function findRclone() {
 }
 
 export async function discoverDrive(): Promise<DriveInstallation | null> {
+  if (!config.driveEnabled) return null;
   const executable = await findRclone();
   const defaultConfig = path.join(
     process.env.LOCALAPPDATA || path.join(os.homedir(), '.config'),

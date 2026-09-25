@@ -4,6 +4,14 @@ Bancada web local para acompanhar o dataset, comparar experimentos YOLO, inspeci
 
 O Studio é um repositório independente. Por padrão, ele acessa o FarmGuard somente para leitura e grava seus próprios dados em `data/`.
 
+## Worktree experimental: regiões incertas
+
+Nesta branch, o anotador tem o modo **Ignorar área**, que desenha retângulos vermelhos independentes das boxes verdes. Eles são salvos em `ignore_regions` no JSON do rascunho e publicados pelo fluxo controlado normal. Não pintam nem recortam a imagem. Desfazer/refazer e excluir área funcionam separadamente das boxes.
+
+Para testar sem tocar no Studio em produção, este worktree usa um `.env` local ignorado pelo Git: FarmGuard aponta para `FarmGuard-ignore-regions`, porta `4311`, acesso somente por `127.0.0.1`, operações desabilitadas e Google Drive desabilitado. Execute `npm run dev` aqui e abra `http://127.0.0.1:4311`. O servidor existente na porta `4310` permanece independente. Não encaminhe a porta `4311` pelo túnel enquanto `AUTH_ENABLED=false`.
+
+O botão **Treinar** em Operações continua usando o treino original. Para testar a nova regra, use `Iazinha/Training/train_ignore.py` no worktree do FarmGuard, após publicar e reconstruir o dataset. Consulte `Iazinha/Training/IGNORE_REGIONS.md` nesse worktree. Não compare `val.py` normal com a avaliação experimental `val_ignore.py` como se fossem a mesma métrica.
+
 ## O que já está integrado
 
 - panorama do dataset completo (incluindo imagens ainda não revisadas), boxes e armadilhas;
