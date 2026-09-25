@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config, farmPaths } from './config.js';
 import { backupDraft, driveStatus } from './drive.js';
 import { dimensions, imageFor, sourceImage, sourceImages } from './annotation-source.js';
+import { calibrationForModels, promotedModel } from './model-management.js';
 
 export type AnnotationBox = {
   x: number;
@@ -93,8 +94,11 @@ async function readCsv(target: string): Promise<RunMetric[]> {
 
 async function listRuns() {
   const names = await dirs(farmPaths.runs);
+  const trainingNames = (await Promise.all(names.map(async (name) =>
+    await exists(path.join(farmPaths.runs, name, 'results.csv')) ? name : null)))
+    .filter((name): name is string => name !== null);
   return Promise.all(
-    names.map(async (name) => {
+    trainingNames.map(async (name) => {
       const runRoot = path.join(farmPaths.runs, name);
       const history = await readCsv(path.join(runRoot, 'results.csv'));
       const latest = history.at(-1) || {};
@@ -277,6 +281,12 @@ export async function overview() {
   const thresholdRows = await readCsv(
     path.join(farmPaths.runs, 'threshold-sweep.csv'),
   );
+  const models = [...directModels, ...runModels].sort((a, b) =>
+    b.modifiedAt.localeCompare(a.modifiedAt));
+  const [calibrations, promoted] = await Promise.all([
+    models.length ? calibrationForModels(models) : Promise.resolve([]),
+    promotedModel(),
+  ]);
   return {
     connected: await exists(config.farmGuardRoot),
     farmGuardRoot: config.farmGuardRoot,
@@ -294,9 +304,9 @@ export async function overview() {
         .sort((a, b) => b.count - a.count),
     },
     runs: runs.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
-    models: [...directModels, ...runModels].sort((a, b) =>
-      b.modifiedAt.localeCompare(a.modifiedAt),
-    ),
+    models: models.map((model, index) => ({ ...model, calibration: calibrations[index] || null,
+      isPromoted: model.id === promoted?.sourceModelId })),
+    promoted,
     predictions: predictions.sort((a, b) =>
       b.modifiedAt.localeCompare(a.modifiedAt),
     ),

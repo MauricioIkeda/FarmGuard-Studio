@@ -24,6 +24,22 @@ export type Model = {
   group: 'model' | 'run';
   size: number;
   modifiedAt: string;
+  calibration: ModelCalibration | null;
+  isPromoted: boolean;
+};
+
+export type ThresholdRow = {
+  confidence: number; nms_iou: number; match_iou: number;
+  ground_truth: number; predictions: number; tp: number; fp: number; fn: number;
+  precision: number; recall: number; f1: number; edit_proxy: number;
+};
+
+export type ModelCalibration = {
+  modelId: string;
+  calibratedAt: string;
+  best: ThresholdRow;
+  rows: ThresholdRow[];
+  stale: boolean;
 };
 
 export type Prediction = {
@@ -48,6 +64,7 @@ export type Overview = {
   };
   runs: Run[];
   models: Model[];
+  promoted: { name: string; sourceModelId: string | null } | null;
   predictions: Prediction[];
   thresholds: Array<Record<string, string | number>>;
   drive: {
@@ -131,4 +148,18 @@ export type PublicationChange = {
   excludedBefore: boolean;
   excludedAfter: boolean;
   changed: boolean;
+};
+
+export type CameraTest = {
+  id: string;
+  modelId: string;
+  modelName: string;
+  confidence: number;
+  nmsIou: number;
+  calibrated: boolean;
+  width: number;
+  height: number;
+  detections: number;
+  originalUrl: string;
+  annotatedUrl: string;
 };

@@ -29,6 +29,8 @@ import { publicationPlan, publishDrafts } from './publication.js';
 import { suggestBoxes } from './ai-suggestions.js';
 import { datasetImagePath, datasetThumbnailPath, listDatasetImages, moveTrap, reapplySplitOverrides } from './dataset-split.js';
 import { predictionThumbnailPath } from './prediction-thumbnails.js';
+import { promoteModel } from './model-management.js';
+import { CameraInputError, cameraTestImage, cleanupCameraTests, createCameraTest, discardCameraTest } from './camera-test.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -37,7 +39,7 @@ app.use((_request, response, next) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('X-Frame-Options', 'DENY');
   response.setHeader('Referrer-Policy', 'no-referrer');
-  response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  response.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
   const scriptPolicy = process.env.NODE_ENV === 'production'
     ? "script-src 'self'"
     : "script-src 'self' 'unsafe-inline'";
@@ -64,6 +66,38 @@ app.get('/api/overview', async (_request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.post('/api/models/promote', async (request, response, next) => {
+  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
+    return response.status(409).json({ error: 'Aguarde a operação atual antes de promover um modelo.' });
+  }
+  if (request.body?.confirmation !== 'PROMOVER') {
+    return response.status(400).json({ error: 'Confirme a promoção explicitamente.' });
+  }
+  try { response.json(await promoteModel(String(request.body?.modelId || ''))); }
+  catch (error) { next(error); }
+});
+
+app.post('/api/camera-test', express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '15mb' }), async (request, response, next) => {
+  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
+    return response.status(409).json({ error: 'Aguarde a operação atual antes de testar uma foto.' });
+  }
+  try {
+    response.status(201).json(await createCameraTest(String(request.query.modelId || ''),
+      request.body as Buffer, String(request.headers['content-type'] || '').split(';')[0].toLowerCase()));
+  } catch (error) { if (error instanceof CameraInputError) response.status(400).json({ error: error.message }); else next(error); }
+});
+app.get('/api/camera-test/:id/:kind', async (request, response) => {
+  try {
+    const target = await cameraTestImage(request.params.id, request.params.kind);
+    if (request.query.download === '1') response.download(target, request.params.kind === 'annotated' ? 'farmguard-teste.jpg' : path.basename(target));
+    else response.sendFile(target);
+  } catch { response.status(404).end(); }
+});
+app.delete('/api/camera-test/:id', async (request, response) => {
+  try { await discardCameraTest(request.params.id); response.status(204).end(); }
+  catch { response.status(404).end(); }
 });
 
 app.get('/api/dataset/split', async (_request, response, next) => {
@@ -230,6 +264,8 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 await loadPersistedJobs();
+await cleanupCameraTests();
+setInterval(() => { void cleanupCameraTests().catch(console.error); }, 60 * 60 * 1000).unref();
 app.listen(config.port, config.host, () => {
   console.log(`FarmGuard Studio em http://localhost:${config.port}`);
   console.log(`FarmGuard: ${config.farmGuardRoot}`);

@@ -7,6 +7,7 @@ import { config, farmPaths } from './config.js';
 import { discoverDrive, remoteProjectRoot } from './drive.js';
 import { studioRoot } from './config.js';
 import { reapplySplitOverrides } from './dataset-split.js';
+import { finishCalibration, modelIdForPath, prepareCalibration, readCalibration, resolveModel, type CalibrationContext } from './model-management.js';
 
 export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
 export type Job = {
@@ -20,6 +21,7 @@ export type Job = {
   logs: string[];
   logCount: number;
   exitCode?: number | null;
+  calibration?: CalibrationContext;
 };
 
 const jobs = new Map<string, Job>();
@@ -64,7 +66,7 @@ function safeName(value: unknown, fallback: string) {
   return normalized || fallback;
 }
 
-async function buildCommand(type: JobType, options: Record<string, unknown>) {
+async function buildCommand(type: JobType, options: Record<string, unknown>, calibration?: CalibrationContext) {
   const python = pythonExecutable();
   if (type === 'train') {
     const ignoreRegions = options.ignoreRegions === true;
@@ -82,12 +84,18 @@ async function buildCommand(type: JobType, options: Record<string, unknown>) {
   }
   if (type === 'tune') {
     const args = [path.join(farmPaths.training, 'tune_thresholds.py')];
-    if (options.model) args.push('--model', String(options.model));
+    if (!calibration) throw new Error('Modelo de calibração ausente.');
+    args.push('--model', calibration.modelPath, '--output', calibration.output);
     return [python, ...args];
   }
   if (type === 'predict') {
     const args = [path.join(studioRoot, 'server', 'python', 'predict.py')];
-    if (options.model) args.push('--model', String(options.model));
+    const modelId = modelIdForPath(String(options.model || path.join(farmPaths.models, 'insect-detector.pt')));
+    const model = await resolveModel(modelId);
+    const calibration = await readCalibration(modelId);
+    args.push('--model', model.path);
+    const best = calibration && !calibration.stale ? calibration.best : null;
+    args.push('--confidence', String(best?.confidence ?? 0.2), '--iou', String(best?.nms_iou ?? 0.4));
     const name = safeName(options.name, `studio-predict-${Date.now()}`);
     try {
       await fs.access(path.join(farmPaths.predictions, name));
@@ -167,7 +175,12 @@ export async function createJob(type: JobType, options: Record<string, unknown>)
   }
   creatingJob = true;
   let command: string[];
-  try { command = await buildCommand(type, options); }
+  let calibration: CalibrationContext | undefined;
+  try {
+    if (type === 'tune') calibration = await prepareCalibration(modelIdForPath(
+      String(options.model || path.join(farmPaths.models, 'insect-detector.pt'))));
+    command = await buildCommand(type, options, calibration);
+  }
   finally { creatingJob = false; }
   const job: Job = {
     id: crypto.randomUUID(),
@@ -177,6 +190,7 @@ export async function createJob(type: JobType, options: Record<string, unknown>)
     command,
     logs: [],
     logCount: 0,
+    calibration,
   };
   jobs.set(job.id, job);
   emit(job);
@@ -230,6 +244,17 @@ function run(job: Job) {
           job.logCount += 1;
         } catch (error) {
           job.logs.push(`Falha ao reaplicar a divisão salva: ${error instanceof Error ? error.message : String(error)}`);
+          job.logCount += 1;
+          job.status = 'failed';
+        }
+      }
+      if (job.status !== 'cancelled' && job.status !== 'failed' && code === 0 && job.type === 'tune' && job.calibration) {
+        try {
+          const result = await finishCalibration(job.calibration);
+          job.logs.push(`Calibração salva para ${job.calibration.modelId}: confiança ${result.best.confidence}, NMS IoU ${result.best.nms_iou}, ${result.best.edit_proxy} correções estimadas.`);
+          job.logCount += 1;
+        } catch (error) {
+          job.logs.push(`Falha ao salvar calibração: ${error instanceof Error ? error.message : String(error)}`);
           job.logCount += 1;
           job.status = 'failed';
         }

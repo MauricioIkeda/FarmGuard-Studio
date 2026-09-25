@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationSummary, AuthStatus, DatasetImage, Job, Overview, PublicationChange } from './types';
+import type { Annotation, AnnotationSummary, AuthStatus, CameraTest, DatasetImage, Job, Overview, PublicationChange } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -20,6 +20,19 @@ export const api = {
     }),
   logout: () => request<AuthStatus>('/api/auth/logout', { method: 'POST' }),
   overview: () => request<Overview>('/api/overview'),
+  promoteModel: (modelId: string) => request<{ name: string; modelId: string; confidence: number; nmsIou: number; backupRoot: string }>('/api/models/promote', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelId, confirmation: 'PROMOVER' }),
+  }),
+  cameraTest: async (modelId: string, file: File) => {
+    const response = await fetch(`/api/camera-test?modelId=${encodeURIComponent(modelId)}`, {
+      method: 'POST', headers: { 'Content-Type': file.type }, body: file,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Falha HTTP ${response.status}`);
+    return body as CameraTest;
+  },
+  discardCameraTest: (id: string) => fetch(`/api/camera-test/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   datasetSplit: () => request<DatasetImage[]>('/api/dataset/split'),
   moveDatasetTrap: (trap: string, split: 'train' | 'val') => request<DatasetImage[]>('/api/dataset/split', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trap, split }),

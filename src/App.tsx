@@ -4,6 +4,8 @@ import {
   Bug,
   Check,
   Cloud,
+  Camera,
+  Crown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -39,9 +41,11 @@ import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { DatasetSplitPage } from './components/DatasetSplitPage';
 import { PredictionComparison } from './components/PredictionComparison';
 import { MetricChart } from './components/MetricChart';
+import { ModelsPage } from './components/ModelsPage';
+import { CameraTestPage } from './components/CameraTestPage';
 import type { Annotation, AnnotationSummary, Job, Overview, PublicationChange, Run } from './types';
 
-type Page = 'overview' | 'experiments' | 'operations' | 'dataset' | 'annotator';
+type Page = 'overview' | 'experiments' | 'models' | 'camera' | 'operations' | 'dataset' | 'annotator';
 
 const number = new Intl.NumberFormat('pt-BR');
 const percent = (value: number) => `${(value * 100).toFixed(1).replace('.', ',')}%`;
@@ -107,6 +111,8 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
         <nav>
           <button className={page === 'overview' ? 'active' : ''} onClick={() => navigate('overview')}><Gauge />Visão geral</button>
           <button className={page === 'experiments' ? 'active' : ''} onClick={() => navigate('experiments')}><FlaskConical />Experimentos</button>
+          <button className={page === 'models' ? 'active' : ''} onClick={() => navigate('models')}><Crown />Modelos</button>
+          <button className={page === 'camera' ? 'active' : ''} onClick={() => navigate('camera')}><Camera />Teste com câmera</button>
           <button className={page === 'operations' ? 'active' : ''} onClick={() => navigate('operations')}><TerminalSquare />Operações</button>
           <button className={page === 'dataset' ? 'active' : ''} onClick={() => navigate('dataset')}><Database />Dataset</button>
           <button className={page === 'annotator' ? 'active' : ''} onClick={() => navigate('annotator')}><Maximize2 />Anotador</button>
@@ -133,6 +139,8 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           {loading && !overview ? <div className="loading-page"><LoaderCircle className="spin" />Lendo o laboratório…</div> : null}
           {overview && page === 'overview' && <OverviewPage data={overview} onNavigate={navigate} />}
           {overview && page === 'experiments' && <ExperimentsPage data={overview} />}
+          {overview && page === 'models' && <ModelsPage data={overview} onRefresh={load} onOperations={() => navigate('operations')} />}
+          {overview && page === 'camera' && <CameraTestPage data={overview} />}
           {overview && page === 'operations' && <OperationsPage data={overview} onRefresh={load} onOpenAnnotation={openAnnotation} />}
           {overview && page === 'dataset' && <DatasetSplitPage operationsEnabled={overview.operationsEnabled} onUpdated={load} />}
           {page === 'annotator' && <AnnotatorPage onSaved={load} targetKey={annotationTarget} />}
@@ -368,8 +376,9 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
         {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">Pesos / checkpoint</label>
         <select id="model" value={model} disabled={busy} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
         {(type === 'train' || type === 'predict' || (type === 'validate' && ignoreRegions)) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></>}
-        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} disabled={busy} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; o fluxo comum continua disponível. As áreas precisam estar publicadas no FarmGuard. Se as boxes mudaram, gere o DatasetYolo antes.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino experimental desativa aumentos geométricos e exige Ultralytics 8.4.161. Use os resultados para comparação, não como substituição automática do modelo promovido.</span></div>}</>}
-        {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para o conjunto de <strong>validação YOLO atual</strong>. O lote aparecerá em Experimentos → Galerias de predição.</span></div>}
+        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} disabled={busy} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; o fluxo comum continua disponível. As áreas precisam estar publicadas no FarmGuard. Se as boxes mudaram, gere o DatasetYolo antes.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino com ignore mantém a aumentação padrão e transforma a máscara junto com a imagem. Requer Ultralytics 8.4.161 e não promove o modelo automaticamente.</span></div>}</>}
+        {type === 'tune' && <div className="operation-note"><SlidersHorizontal /><span>O Studio testa a grade de confiança e NMS IoU no split de validação. O melhor ajuste é salvo no catálogo deste peso, considerando o menor total de falsos positivos e insetos perdidos.</span></div>}
+        {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para a <strong>validação YOLO atual</strong>, usando sua calibração salva quando existir; caso contrário, confiança 0,20 e NMS IoU 0,40. O lote aparecerá em Experimentos.</span></div>}
         <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
         {message && <div className="inline-error"><CircleAlert />{message}</div>}
         <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled || busy}><Play />{busy ? 'Operação em andamento' : data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
