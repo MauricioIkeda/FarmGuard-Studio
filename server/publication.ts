@@ -13,6 +13,8 @@ export type PublicationChange = {
   publishedBefore: boolean;
   boxesBefore: number;
   boxesAfter: number;
+  ignoreBefore: number;
+  ignoreAfter: number;
   reviewedBefore: boolean;
   reviewedAfter: boolean;
   excludedBefore: boolean;
@@ -57,6 +59,8 @@ export async function publicationPlan(): Promise<PublicationChange[]> {
       publishedBefore: Boolean(original),
       boxesBefore: original?.boxes.length || 0,
       boxesAfter: draft.boxes.length,
+      ignoreBefore: original?.ignore_regions?.length || 0,
+      ignoreAfter: draft.ignore_regions?.length || 0,
       reviewedBefore: original?.reviewed || false,
       reviewedAfter: draft.reviewed,
       excludedBefore: original?.excluded || false,

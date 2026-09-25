@@ -85,6 +85,7 @@ export type Annotation = {
   class: string;
   source?: { type?: string; url?: string; metadata?: Record<string, unknown> };
   boxes: Box[];
+  ignore_regions?: Box[];
   studioDraft?: boolean;
 };
 
@@ -113,6 +114,8 @@ export type PublicationChange = {
   publishedBefore: boolean;
   boxesBefore: number;
   boxesAfter: number;
+  ignoreBefore: number;
+  ignoreAfter: number;
   reviewedBefore: boolean;
   reviewedAfter: boolean;
   excludedBefore: boolean;

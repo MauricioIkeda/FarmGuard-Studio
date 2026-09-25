@@ -55,8 +55,11 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 function StudioApp({ onLogout }: { onLogout: () => void }) {
-  const [page, setPage] = useState<Page>('overview');
-  const [annotationTarget, setAnnotationTarget] = useState<string | null>(null);
+  const [annotationTarget, setAnnotationTarget] = useState<string | null>(() => {
+    const key = new URLSearchParams(window.location.search).get('annotation');
+    return key && /^[a-f0-9-]{36}$/i.test(key) ? key : null;
+  });
+  const [page, setPage] = useState<Page>(annotationTarget ? 'annotator' : 'overview');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -287,6 +290,7 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
   const [type, setType] = useState<Job['type']>('validate');
   const [model, setModel] = useState(data.models[0]?.path || '');
   const [name, setName] = useState('');
+  const [ignoreRegions, setIgnoreRegions] = useState(false);
   const [message, setMessage] = useState('');
   const loadJobs = useCallback(async () => setJobs(await api.jobs()), []);
   useEffect(() => {
@@ -302,7 +306,7 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
   const submit = async () => {
     setMessage('');
     try {
-      const job = await api.createJob(type, { model, name });
+      const job = await api.createJob(type, { model, name, ignoreRegions: (type === 'train' || type === 'validate') && ignoreRegions });
       setJobs((current) => [job, ...current]);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar.'); }
   };
@@ -319,7 +323,8 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
         ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
         {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">Pesos / checkpoint</label>
         <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
-        {(type === 'train' || type === 'predict') && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} onChange={(event) => setName(event.target.value)} /></>}
+        {(type === 'train' || type === 'predict' || (type === 'validate' && ignoreRegions)) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} onChange={(event) => setName(event.target.value)} /></>}
+        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; o fluxo comum continua disponível. As áreas precisam estar publicadas no FarmGuard. Se as boxes mudaram, gere o DatasetYolo antes.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino experimental desativa aumentos geométricos e exige Ultralytics 8.4.161. Use os resultados para comparação, não como substituição automática do modelo promovido.</span></div>}</>}
         {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para o conjunto de <strong>validação YOLO atual</strong>. O lote aparecerá em Experimentos → Galerias de predição.</span></div>}
         <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
         {message && <div className="inline-error"><CircleAlert />{message}</div>}
@@ -339,6 +344,7 @@ function publicationKind(item: PublicationChange) {
   if (item.excludedAfter && !item.excludedBefore) return { label: 'Exclusão', tone: 'danger' };
   if (item.excludedBefore && !item.excludedAfter) return { label: 'Restauração', tone: 'success' };
   if (!item.publishedBefore) return { label: 'Adição', tone: 'success' };
+  if (item.boxesBefore === item.boxesAfter && item.reviewedBefore === item.reviewedAfter && item.ignoreBefore !== item.ignoreAfter) return { label: 'Áreas incertas', tone: 'warning' };
   return { label: 'Atualização', tone: 'warning' };
 }
 
@@ -384,7 +390,7 @@ function PublicationPanel({ data, onUpdated, onOpenAnnotation }: { data: Overvie
     <article className="panel publication-card">
       <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
       <p className="publication-help">Clique numa imagem para conferir ou restaurar no anotador. Publicar uma exclusão marca o JSON como excluído; não apaga a foto original. Ela sai do YOLO na próxima reconstrução.</p>
-      {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => { const kind = publicationKind(item); return <div className="publication-item" key={item.key}><input type="checkbox" aria-label={`Selecionar ${item.image} para publicação`} checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><button type="button" className="publication-open" onClick={() => onOpenAnnotation(item.key)} title={`Abrir ${item.image} no anotador`}><span className="publication-item-title"><strong>{item.trap || item.image}</strong><span className={`publication-kind ${kind.tone}`}>{kind.label}</span></span><small>{item.image} · {item.boxesBefore} → {item.boxesAfter} boxes{item.excludedAfter ? ' · ficará fora do YOLO' : item.reviewedAfter ? ' · revisada' : ' · pendente de revisão'}</small></button><ChevronRight size={16} aria-hidden="true" /></div>; })}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
+      {loading ? <div className="mini-loading"><LoaderCircle className="spin" />Comparando arquivos…</div> : changed.length ? <div className="publication-list">{changed.map((item) => { const kind = publicationKind(item); return <div className="publication-item" key={item.key}><input type="checkbox" aria-label={`Selecionar ${item.image} para publicação`} checked={selected.includes(item.key)} onChange={() => setSelected((current) => current.includes(item.key) ? current.filter((key) => key !== item.key) : [...current, item.key])} /><button type="button" className="publication-open" onClick={() => onOpenAnnotation(item.key)} title={`Abrir ${item.image} no anotador`}><span className="publication-item-title"><strong>{item.trap || item.image}</strong><span className={`publication-kind ${kind.tone}`}>{kind.label}</span></span><small>{item.image} · {item.boxesBefore} → {item.boxesAfter} boxes · {item.ignoreBefore} → {item.ignoreAfter} áreas incertas{item.excludedAfter ? ' · ficará fora do YOLO' : item.reviewedAfter ? ' · revisada' : ' · pendente de revisão'}</small></button><ChevronRight size={16} aria-hidden="true" /></div>; })}</div> : <Empty>Nenhum rascunho diferente do FarmGuard.</Empty>}
       {message && <div className={publicationWarning ? 'inline-error' : 'inline-success'}>{message}</div>}
       <label className="publication-rebuild-option"><input type="checkbox" checked={rebuildAfterPublish} onChange={(event) => setRebuildAfterPublish(event.target.checked)} disabled={publishing} /><span>Reconstruir DatasetYolo logo após publicar<small>Desmarcado: publica e faz backup sem alterar o dataset YOLO. Você pode gerar o YOLO mais tarde em Operações.</small></span></label>
       <button className="primary-button full" disabled={!selected.length || publishing} onClick={() => void publish()}><UploadCloud />{publishing ? 'Publicando…' : rebuildAfterPublish ? 'Publicar, fazer backup e gerar YOLO' : 'Publicar e fazer backup'}</button>
@@ -398,8 +404,10 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   const targetApplied = useRef(false);
   const [annotation, setAnnotation] = useState<Annotation | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [history, setHistory] = useState<Annotation['boxes'][]>([]);
-  const [future, setFuture] = useState<Annotation['boxes'][]>([]);
+  const [selectedIgnore, setSelectedIgnore] = useState<number | null>(null);
+  type Markings = Pick<Annotation, 'boxes' | 'ignore_regions'>;
+  const [history, setHistory] = useState<Markings[]>([]);
+  const [future, setFuture] = useState<Markings[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -447,7 +455,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     setAnnotation(null);
     api.annotation(activeKey).then((value) => {
       if (!active) return;
-      setAnnotation(value); setHistory([]); setFuture([]); setSelected(null); setDirty(false); setMessage(''); setAiNotice('');
+      setAnnotation(value); setHistory([]); setFuture([]); setSelected(null); setSelectedIgnore(null); setDirty(false); setMessage(''); setAiNotice('');
     }).catch((error) => { if (active) setMessage(error.message); });
     return () => { active = false; };
   }, [activeKey]);
@@ -497,20 +505,20 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   };
   const historyPoint = () => {
     if (!annotation) return;
-    setHistory((items) => [...items.slice(-39), annotation.boxes.map((box) => ({ ...box }))]);
+    setHistory((items) => [...items.slice(-39), { boxes: annotation.boxes.map((box) => ({ ...box })), ignore_regions: (annotation.ignore_regions || []).map((region) => ({ ...region })) }]);
     setFuture([]);
   };
   const undo = () => {
     if (!annotation || !history.length) return;
-    setFuture((items) => [...items, annotation.boxes.map((box) => ({ ...box }))]);
-    setAnnotation({ ...annotation, boxes: history.at(-1)! });
-    setHistory((items) => items.slice(0, -1)); setDirty(true); setSelected(null);
+    setFuture((items) => [...items, { boxes: annotation.boxes.map((box) => ({ ...box })), ignore_regions: (annotation.ignore_regions || []).map((region) => ({ ...region })) }]);
+    setAnnotation({ ...annotation, ...history.at(-1)! });
+    setHistory((items) => items.slice(0, -1)); setDirty(true); setSelected(null); setSelectedIgnore(null);
   };
   const redo = () => {
     if (!annotation || !future.length) return;
-    setHistory((items) => [...items, annotation.boxes.map((box) => ({ ...box }))]);
-    setAnnotation({ ...annotation, boxes: future.at(-1)! });
-    setFuture((items) => items.slice(0, -1)); setDirty(true); setSelected(null);
+    setHistory((items) => [...items, { boxes: annotation.boxes.map((box) => ({ ...box })), ignore_regions: (annotation.ignore_regions || []).map((region) => ({ ...region })) }]);
+    setAnnotation({ ...annotation, ...future.at(-1)! });
+    setFuture((items) => items.slice(0, -1)); setDirty(true); setSelected(null); setSelectedIgnore(null);
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -534,6 +542,11 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
         setAnnotation({ ...annotation, boxes: annotation.boxes.filter((_, boxIndex) => boxIndex !== selected) });
         setSelected(null); setDirty(true);
       }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIgnore !== null && !typing) {
+        historyPoint();
+        setAnnotation({ ...annotation, ignore_regions: (annotation.ignore_regions || []).filter((_, regionIndex) => regionIndex !== selectedIgnore) });
+        setSelectedIgnore(null); setDirty(true);
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void persist(annotation.reviewed); }
       if (!typing && event.key === 'ArrowLeft') void goTo(index - 1);
       if (!typing && event.key === 'ArrowRight') void goTo(index + 1);
@@ -542,6 +555,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     return () => window.removeEventListener('keydown', key);
   });
   const updateBoxes = (boxes: Annotation['boxes']) => { if (annotation) { setAnnotation({ ...annotation, boxes }); setDirty(true); } };
+  const updateIgnoreRegions = (ignore_regions: NonNullable<Annotation['ignore_regions']>) => { if (annotation) { setAnnotation({ ...annotation, ignore_regions }); setDirty(true); } };
   const finish = async () => {
     if (!annotation) return;
     const nextKey = [...visible.slice(index + 1), ...visible.slice(0, index)]
@@ -621,9 +635,9 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
       <div className="annotation-workspace">
         {aiBusy && <div className="annotation-ai-overlay"><LoaderCircle className="spin" />A IA está analisando a imagem…</div>}
         {annotation ? <>
-          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
-          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} selected={selected} onSelected={setSelected} onChange={updateBoxes} onHistoryPoint={historyPoint} />
-          <div className="annotation-bottom"><div><span>Box selecionada</span><strong>{selected === null ? 'Nenhuma' : `#${selected + 1}`}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
+          <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes · {(annotation.ignore_regions || []).length} áreas incertas{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
+          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} ignoreRegions={annotation.ignore_regions || []} selected={selected} selectedIgnore={selectedIgnore} onSelected={setSelected} onSelectedIgnore={setSelectedIgnore} onChange={updateBoxes} onIgnoreChange={updateIgnoreRegions} onHistoryPoint={historyPoint} />
+          <div className="annotation-bottom"><div><span>Seleção</span><strong>{selectedIgnore !== null ? `Área incerta #${selectedIgnore + 1}` : selected !== null ? `Inseto #${selected + 1}` : 'Nenhuma'}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}{selectedIgnore !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateIgnoreRegions((annotation.ignore_regions || []).filter((_, regionIndex) => regionIndex !== selectedIgnore)); setSelectedIgnore(null); }}><Trash2 />Excluir área incerta</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
         </> : <div className="loading-page">{visible.length ? <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
       </div>
     </section>

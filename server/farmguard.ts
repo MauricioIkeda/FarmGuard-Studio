@@ -26,6 +26,7 @@ export type Annotation = {
     metadata?: Record<string, unknown>;
   };
   boxes: AnnotationBox[];
+  ignore_regions?: AnnotationBox[];
   studioDraft?: boolean;
 };
 
@@ -203,7 +204,7 @@ export async function getAnnotation(key: string): Promise<Annotation | null> {
     const { width, height } = await dimensions(await imageFor(source));
     return {
       schema_version: 4, key, image: source.image, width, height,
-      reviewed: false, excluded: false, class: 'insect', boxes: [],
+      reviewed: false, excluded: false, class: 'insect', boxes: [], ignore_regions: [],
       source: { type: 'parquet', url: source.url, metadata: source.metadata },
       studioDraft: false,
     };
@@ -233,7 +234,17 @@ export async function saveDraft(key: string, input: Annotation) {
       width: Number(box.width),
       height: Number(box.height),
     })),
+    ignore_regions: (input.ignore_regions || []).map((region) => ({
+      x: Number(region.x), y: Number(region.y),
+      width: Number(region.width), height: Number(region.height),
+    })),
   };
+  if ([...clean.boxes, ...(clean.ignore_regions || [])].some((box) =>
+    ![box.x, box.y, box.width, box.height].every(Number.isFinite) ||
+    box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 ||
+    box.x + box.width > clean.width || box.y + box.height > clean.height)) {
+    throw new Error('Box ou região incerta fora dos limites da imagem.');
+  }
   delete clean.studioDraft;
   const draftDir = path.join(config.dataRoot, 'annotation-drafts');
   await fs.mkdir(draftDir, { recursive: true });

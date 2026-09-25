@@ -14,6 +14,7 @@ try {
 
 export const config = {
   port: Number(process.env.PORT || 4310),
+  host: process.env.HOST || '0.0.0.0',
   farmGuardRoot:
     process.env.FARMGUARD_ROOT ||
     path.resolve(studioRoot, '..', 'FarmGuard'),
@@ -25,6 +26,7 @@ export const config = {
   adminPassword: process.env.ADMIN_PASSWORD || '',
   sessionSecret: process.env.SESSION_SECRET || '',
   driveRemote: process.env.INSECT_AI_DRIVE_REMOTE || 'nte-google-drive',
+  driveEnabled: String(process.env.INSECT_AI_DRIVE_ENABLED ?? 'true').toLowerCase() === 'true',
   driveRoot: process.env.INSECT_AI_DRIVE_ROOT || 'Insect AI Datasets',
   rclonePath: process.env.INSECT_AI_RCLONE_PATH || '',
   rcloneConfig: process.env.INSECT_AI_RCLONE_CONFIG || '',

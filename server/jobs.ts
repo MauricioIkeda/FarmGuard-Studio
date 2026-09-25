@@ -39,14 +39,17 @@ function safeName(value: unknown, fallback: string) {
 async function buildCommand(type: JobType, options: Record<string, unknown>) {
   const python = pythonExecutable();
   if (type === 'train') {
-    const args = [path.join(farmPaths.training, 'train.py')];
+    const ignoreRegions = options.ignoreRegions === true;
+    const args = [path.join(farmPaths.training, ignoreRegions ? 'train_ignore.py' : 'train.py')];
     if (options.model) args.push('--model', String(options.model));
-    args.push('--name', safeName(options.name, `studio-${Date.now()}`));
+    args.push('--name', safeName(options.name, `${ignoreRegions ? 'studio-ignore' : 'studio'}-${Date.now()}`));
     return [python, ...args];
   }
   if (type === 'validate') {
-    const args = [path.join(farmPaths.training, 'val.py')];
-    if (options.model) args.push('--model', String(options.model));
+    const ignoreRegions = options.ignoreRegions === true;
+    const args = [path.join(farmPaths.training, ignoreRegions ? 'val_ignore.py' : 'val.py')];
+    if (options.model || ignoreRegions) args.push('--model', String(options.model || path.join(farmPaths.models, 'insect-detector.pt')));
+    if (ignoreRegions && options.name) args.push('--name', safeName(options.name, `studio-ignore-validation-${Date.now()}`));
     return [python, ...args];
   }
   if (type === 'tune') {
