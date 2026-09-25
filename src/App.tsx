@@ -55,8 +55,11 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 function StudioApp({ onLogout }: { onLogout: () => void }) {
-  const [page, setPage] = useState<Page>('overview');
-  const [annotationTarget, setAnnotationTarget] = useState<string | null>(null);
+  const [annotationTarget, setAnnotationTarget] = useState<string | null>(() => {
+    const key = new URLSearchParams(window.location.search).get('annotation');
+    return key && /^[a-f0-9-]{36}$/i.test(key) ? key : null;
+  });
+  const [page, setPage] = useState<Page>(annotationTarget ? 'annotator' : 'overview');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
