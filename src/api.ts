@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationSummary, AuthStatus, Job, Overview, PublicationChange } from './types';
+import type { Annotation, AnnotationSummary, AuthStatus, DatasetImage, Job, Overview, PublicationChange } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -20,6 +20,11 @@ export const api = {
     }),
   logout: () => request<AuthStatus>('/api/auth/logout', { method: 'POST' }),
   overview: () => request<Overview>('/api/overview'),
+  datasetSplit: () => request<DatasetImage[]>('/api/dataset/split'),
+  moveDatasetTrap: (trap: string, split: 'train' | 'val') => request<DatasetImage[]>('/api/dataset/split', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trap, split }),
+  }),
+  reapplyDatasetSplit: () => request<DatasetImage[]>('/api/dataset/split/reapply', { method: 'POST' }),
   annotations: () => request<AnnotationSummary[]>('/api/annotations'),
   uploadParquet: async (file: File) => {
     const response = await fetch('/api/sources/parquet', {

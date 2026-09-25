@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import { config, farmPaths } from './config.js';
 import { discoverDrive, remoteProjectRoot } from './drive.js';
 import { studioRoot } from './config.js';
+import { reapplySplitOverrides } from './dataset-split.js';
 
 export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
 export type Job = {
@@ -185,11 +186,22 @@ function run(job: Job) {
     emit(job);
   });
   child.on('close', (code) => {
-    if (job.status !== 'cancelled') job.status = code === 0 ? 'completed' : 'failed';
-    job.exitCode = code;
-    job.finishedAt = new Date().toISOString();
-    processes.delete(job.id);
-    emit(job);
+    void (async () => {
+      if (job.status !== 'cancelled' && job.status !== 'failed' && code === 0 && job.type === 'dataset') {
+        try {
+          await reapplySplitOverrides();
+          job.logs.push('Divisão por armadilha do Studio reaplicada após a reconstrução YOLO.');
+        } catch (error) {
+          job.logs.push(`Falha ao reaplicar a divisão salva: ${error instanceof Error ? error.message : String(error)}`);
+          job.status = 'failed';
+        }
+      }
+      if (job.status !== 'cancelled' && job.status !== 'failed') job.status = code === 0 ? 'completed' : 'failed';
+      job.exitCode = code;
+      job.finishedAt = new Date().toISOString();
+      processes.delete(job.id);
+      emit(job);
+    })();
   });
 }
 

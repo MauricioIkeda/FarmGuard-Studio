@@ -72,6 +72,15 @@ export type AnnotationSummary = {
   cached: boolean;
 };
 
+export type DatasetImage = {
+  image: string;
+  split: 'train' | 'val';
+  desiredSplit: 'train' | 'val';
+  trap: string;
+  boxes: number;
+  ignoreRegions: number;
+};
+
 export type Box = { x: number; y: number; width: number; height: number };
 
 export type Annotation = {

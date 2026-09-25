@@ -26,6 +26,7 @@ import { authStatus, login, logout, requireAuth } from './auth.js';
 import { driveStatus } from './drive.js';
 import { publicationPlan, publishDrafts } from './publication.js';
 import { suggestBoxes } from './ai-suggestions.js';
+import { datasetImagePath, datasetThumbnailPath, listDatasetImages, moveTrap, reapplySplitOverrides } from './dataset-split.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -61,6 +62,35 @@ app.get('/api/overview', async (_request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get('/api/dataset/split', async (_request, response, next) => {
+  try { response.json(await listDatasetImages()); } catch (error) { next(error); }
+});
+
+app.get('/api/dataset/image/:split/:image', async (request, response, next) => {
+  try { response.sendFile(await datasetImagePath(request.params.split, request.params.image)); }
+  catch (error) { next(error); }
+});
+
+app.get('/api/dataset/thumbnail/:split/:image', async (request, response, next) => {
+  try { response.sendFile(await datasetThumbnailPath(request.params.split, request.params.image)); }
+  catch (error) { next(error); }
+});
+
+app.post('/api/dataset/split', async (request, response, next) => {
+  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
+    return response.status(409).json({ error: 'Aguarde a operação atual terminar antes de alterar o dataset.' });
+  }
+  try { response.json(await moveTrap(request.body?.trap, request.body?.split)); }
+  catch (error) { next(error); }
+});
+
+app.post('/api/dataset/split/reapply', async (_request, response, next) => {
+  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
+    return response.status(409).json({ error: 'Aguarde a operação atual terminar antes de alterar o dataset.' });
+  }
+  try { response.json(await reapplySplitOverrides()); } catch (error) { next(error); }
 });
 
 app.get('/api/annotations', async (_request, response, next) => {

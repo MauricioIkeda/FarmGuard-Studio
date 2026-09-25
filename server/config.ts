@@ -18,7 +18,7 @@ export const config = {
   farmGuardRoot:
     process.env.FARMGUARD_ROOT ||
     path.resolve(studioRoot, '..', 'FarmGuard'),
-  dataRoot: path.join(studioRoot, 'data'),
+  dataRoot: process.env.STUDIO_DATA_ROOT || path.join(studioRoot, 'data'),
   allowFarmGuardJobs:
     String(process.env.ALLOW_FARMGUARD_JOBS).toLowerCase() === 'true',
   authEnabled: String(process.env.AUTH_ENABLED ?? 'true').toLowerCase() === 'true',

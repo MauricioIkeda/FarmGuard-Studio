@@ -35,10 +35,11 @@ import {
 } from 'lucide-react';
 import { api } from './api';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
+import { DatasetSplitPage } from './components/DatasetSplitPage';
 import { MetricChart } from './components/MetricChart';
 import type { Annotation, AnnotationSummary, Job, Overview, PublicationChange, Run } from './types';
 
-type Page = 'overview' | 'experiments' | 'operations' | 'annotator';
+type Page = 'overview' | 'experiments' | 'operations' | 'dataset' | 'annotator';
 
 const number = new Intl.NumberFormat('pt-BR');
 const percent = (value: number) => `${(value * 100).toFixed(1).replace('.', ',')}%`;
@@ -105,6 +106,7 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'overview' ? 'active' : ''} onClick={() => navigate('overview')}><Gauge />Visão geral</button>
           <button className={page === 'experiments' ? 'active' : ''} onClick={() => navigate('experiments')}><FlaskConical />Experimentos</button>
           <button className={page === 'operations' ? 'active' : ''} onClick={() => navigate('operations')}><TerminalSquare />Operações</button>
+          <button className={page === 'dataset' ? 'active' : ''} onClick={() => navigate('dataset')}><Database />Dataset</button>
           <button className={page === 'annotator' ? 'active' : ''} onClick={() => navigate('annotator')}><Maximize2 />Anotador</button>
         </nav>
         <div className="sidebar-foot">
@@ -130,6 +132,7 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           {overview && page === 'overview' && <OverviewPage data={overview} onNavigate={navigate} />}
           {overview && page === 'experiments' && <ExperimentsPage data={overview} />}
           {overview && page === 'operations' && <OperationsPage data={overview} onRefresh={load} onOpenAnnotation={openAnnotation} />}
+          {overview && page === 'dataset' && <DatasetSplitPage operationsEnabled={overview.operationsEnabled} onUpdated={load} />}
           {page === 'annotator' && <AnnotatorPage onSaved={load} targetKey={annotationTarget} />}
         </div>
       </main>
