@@ -28,6 +28,7 @@ import { driveStatus } from './drive.js';
 import { publicationPlan, publishDrafts } from './publication.js';
 import { suggestBoxes } from './ai-suggestions.js';
 import { datasetImagePath, datasetThumbnailPath, listDatasetImages, moveTrap, reapplySplitOverrides } from './dataset-split.js';
+import { predictionThumbnailPath } from './prediction-thumbnails.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -146,6 +147,11 @@ app.get('/api/predictions/:group', async (request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get('/api/prediction-thumbnails/:group/:file', async (request, response) => {
+  try { response.sendFile(await predictionThumbnailPath(request.params.group, request.params.file)); }
+  catch { response.status(404).end(); }
 });
 
 app.get('/api/predictions/:group/:file', async (request, response) => {

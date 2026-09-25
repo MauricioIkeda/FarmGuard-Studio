@@ -37,6 +37,7 @@ import { api } from './api';
 import { mergeJobs } from './job-sync';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { DatasetSplitPage } from './components/DatasetSplitPage';
+import { PredictionComparison } from './components/PredictionComparison';
 import { MetricChart } from './components/MetricChart';
 import type { Annotation, AnnotationSummary, Job, Overview, PublicationChange, Run } from './types';
 
@@ -211,6 +212,7 @@ function ExperimentsPage({ data }: { data: Overview }) {
         {data.thresholds.slice(0, 8).map((row, index) => <tr key={index}><td><strong>{Number(row.confidence).toFixed(2)}</strong></td><td>{Number(row.nms_iou).toFixed(2)}</td><td>{percent(Number(row.precision))}</td><td>{percent(Number(row.recall))}</td><td><span className="metric-value">{percent(Number(row.f1))}</span></td><td>{row.tp}</td><td>{row.fp}</td><td>{row.fn}</td><td>{row.edit_proxy}</td></tr>)}
       </tbody></table></div> : <Empty>Nenhum sweep de thresholds encontrado.</Empty>}
     </section>
+    <PredictionComparison predictions={data.predictions} />
     <section className="panel">
       <div className="panel-head"><div><span className="eyebrow">Inspeção visual</span><h2>Galerias de predição</h2></div><StatusPill>{data.predictions.length} lotes</StatusPill></div>
       <div className="prediction-grid">{data.predictions.map((prediction) => <button key={prediction.name} className="prediction-card" onClick={() => void openGallery(prediction.name)}>

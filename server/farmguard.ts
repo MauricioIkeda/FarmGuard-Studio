@@ -343,14 +343,15 @@ export async function annotationSummaries() {
 }
 
 export function resolvePredictionImage(group: string, file: string) {
-  if (!/^[a-zA-Z0-9_.-]+$/.test(group) || !/^[a-zA-Z0-9_.-]+$/.test(file)) {
+  if (!/^[a-zA-Z0-9_.-]+$/.test(group) || !/^[a-zA-Z0-9_.-]+$/.test(file) ||
+    group === '.' || group === '..' || file === '.' || file === '..') {
     return null;
   }
   return path.join(farmPaths.predictions, group, file);
 }
 
 export async function predictionFiles(group: string) {
-  if (!/^[a-zA-Z0-9_.-]+$/.test(group)) return [];
+  if (!/^[a-zA-Z0-9_.-]+$/.test(group) || group === '.' || group === '..') return [];
   return (await files(path.join(farmPaths.predictions, group))).filter((file) =>
     /\.(jpe?g|png|webp)$/i.test(file),
   );
