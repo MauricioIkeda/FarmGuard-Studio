@@ -12,7 +12,7 @@ export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'd
 export type Job = {
   id: string;
   type: JobType;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
@@ -26,6 +26,31 @@ const jobs = new Map<string, Job>();
 const processes = new Map<string, ChildProcessWithoutNullStreams>();
 let creatingJob = false;
 export const jobEvents = new EventEmitter();
+
+export async function loadPersistedJobs() {
+  const root = path.join(config.dataRoot, 'jobs');
+  let files: string[];
+  try { files = (await fs.readdir(root)).filter((name) => /^[0-9a-f-]{36}\.json$/i.test(name)); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  for (const file of files) {
+    try {
+      const job = JSON.parse(await fs.readFile(path.join(root, file), 'utf8')) as Job;
+      if (job.id !== path.basename(file, '.json') || !Array.isArray(job.logs) || !Array.isArray(job.command) || !job.createdAt) throw new Error('Registro inválido');
+      job.logCount = Math.max(job.logCount || 0, job.logs.length);
+      if (job.status === 'queued' || job.status === 'running') {
+        job.status = 'interrupted';
+        job.finishedAt = new Date().toISOString();
+        job.logs.push('Acompanhamento interrompido pelo reinício do Studio; confira se o processo externo continuou em execução.');
+        job.logCount += 1;
+        await persist(job);
+      }
+      jobs.set(job.id, job);
+    } catch (error) { console.error(`Não foi possível recuperar o histórico ${file}:`, error); }
+  }
+}
 
 function pythonExecutable() {
   const windows = path.join(farmPaths.ia, '.venv', 'Scripts', 'python.exe');

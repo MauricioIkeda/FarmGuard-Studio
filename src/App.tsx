@@ -371,7 +371,7 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
       </article>
       <OperationTerminal job={active} />
     </section>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">Sessão atual</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} className={active?.id === job.id ? 'selected' : ''} onClick={() => setSelectedJobId(job.id)}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada nesta sessão.</Empty>}</section>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">Registros salvos</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} className={active?.id === job.id ? 'selected' : ''} onClick={() => setSelectedJobId(job.id)}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada ainda.</Empty>}</section>
     <PublicationPanel data={data} onUpdated={async () => { await loadJobs(); await onRefresh(); }} onOpenAnnotation={onOpenAnnotation} />
   </>;
 }

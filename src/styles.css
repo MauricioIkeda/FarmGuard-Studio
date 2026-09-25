@@ -220,6 +220,7 @@ td strong { color: var(--text); }
 .job-status.running { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
 .job-status.completed { background: var(--mint); }
 .job-status.failed { background: var(--red); }
+.job-status.interrupted { background: var(--amber); }
 
 .publish-grid { display: grid; grid-template-columns: minmax(300px, .7fr) minmax(0, 1.3fr); gap: 14px; }
 .drive-card, .publication-card { margin: 0; }

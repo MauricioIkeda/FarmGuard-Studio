@@ -101,7 +101,7 @@ export type Annotation = {
 export type Job = {
   id: string;
   type: 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;

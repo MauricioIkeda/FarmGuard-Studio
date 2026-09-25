@@ -20,6 +20,7 @@ import {
   getJob,
   jobEvents,
   listJobs,
+  loadPersistedJobs,
   type JobType,
 } from './jobs.js';
 import { authStatus, login, logout, requireAuth } from './auth.js';
@@ -222,6 +223,7 @@ if (process.env.NODE_ENV === 'production') {
   app.use(vite.middlewares);
 }
 
+await loadPersistedJobs();
 app.listen(config.port, config.host, () => {
   console.log(`FarmGuard Studio em http://localhost:${config.port}`);
   console.log(`FarmGuard: ${config.farmGuardRoot}`);
