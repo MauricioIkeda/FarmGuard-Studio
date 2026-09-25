@@ -106,6 +106,7 @@ export type Job = {
   startedAt?: string;
   finishedAt?: string;
   logs: string[];
+  logCount?: number;
   command: string[];
   exitCode?: number | null;
 };

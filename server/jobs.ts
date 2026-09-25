@@ -18,11 +18,13 @@ export type Job = {
   finishedAt?: string;
   command: string[];
   logs: string[];
+  logCount: number;
   exitCode?: number | null;
 };
 
 const jobs = new Map<string, Job>();
 const processes = new Map<string, ChildProcessWithoutNullStreams>();
+let creatingJob = false;
 export const jobEvents = new EventEmitter();
 
 function pythonExecutable() {
@@ -135,7 +137,13 @@ export async function createJob(type: JobType, options: Record<string, unknown>)
       'Operacoes desativadas. Defina ALLOW_FARMGUARD_JOBS=true somente depois de autorizar escritas de resultados no FarmGuard.',
     );
   }
-  const command = await buildCommand(type, options);
+  if (creatingJob || listJobs().some((job) => job.status === 'queued' || job.status === 'running')) {
+    throw new Error('Já existe uma operação em andamento. Aguarde a conclusão antes de iniciar outra.');
+  }
+  creatingJob = true;
+  let command: string[];
+  try { command = await buildCommand(type, options); }
+  finally { creatingJob = false; }
   const job: Job = {
     id: crypto.randomUUID(),
     type,
@@ -143,6 +151,7 @@ export async function createJob(type: JobType, options: Record<string, unknown>)
     createdAt: new Date().toISOString(),
     command,
     logs: [],
+    logCount: 0,
   };
   jobs.set(job.id, job);
   emit(job);
@@ -173,6 +182,7 @@ function run(job: Job) {
       .filter(Boolean)
       .map((line) => (channel === 'stderr' ? `[erro] ${line}` : line));
     job.logs.push(...lines);
+    job.logCount += lines.length;
     if (job.logs.length > 1500) job.logs.splice(0, job.logs.length - 1500);
     emit(job);
   };
@@ -180,6 +190,7 @@ function run(job: Job) {
   child.stderr.on('data', (chunk) => capture(chunk, 'stderr'));
   child.on('error', (error) => {
     job.logs.push(error.message);
+    job.logCount += 1;
     job.status = 'failed';
     job.finishedAt = new Date().toISOString();
     processes.delete(job.id);
@@ -191,8 +202,10 @@ function run(job: Job) {
         try {
           await reapplySplitOverrides();
           job.logs.push('Divisão por armadilha do Studio reaplicada após a reconstrução YOLO.');
+          job.logCount += 1;
         } catch (error) {
           job.logs.push(`Falha ao reaplicar a divisão salva: ${error instanceof Error ? error.message : String(error)}`);
+          job.logCount += 1;
           job.status = 'failed';
         }
       }

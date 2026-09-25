@@ -191,9 +191,13 @@ td strong { color: var(--text); }
 .operation-types button { border: 1px solid var(--line); border-radius: 8px; background: #0a120f; padding: 11px 6px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 750; }
 .operation-types button svg { width: 18px; }
 .operation-types button.active { color: var(--lime); border-color: #6f9c39; background: #b9f35a0d; }
+.operation-types button:disabled { cursor: not-allowed; opacity: .62; }
+.operation-form input:disabled, .operation-form select:disabled { opacity: .62; cursor: not-allowed; }
 .operation-note { margin-top: 18px; display: flex; gap: 9px; align-items: center; color: var(--muted); background: #08100d; border: 1px solid var(--line-soft); border-radius: 8px; padding: 11px; font-size: 12px; }
 .operation-note svg { width: 17px; color: var(--mint); }
 .terminal-panel { display: flex; flex-direction: column; min-width: 0; }
+.terminal-actions { display: flex; align-items: center; gap: 8px; }
+.terminal-actions .secondary-button { padding: 7px 10px; font-size: 11px; }
 .terminal { background: #030605; border: 1px solid #1d2b25; border-radius: 10px; min-height: 390px; flex: 1; overflow: hidden; }
 .terminal-chrome { display: flex; gap: 6px; height: 34px; align-items: center; padding: 0 12px; border-bottom: 1px solid #16221d; background: #080d0b; }
 .terminal-chrome i { width: 8px; height: 8px; border-radius: 50%; background: #415149; }
@@ -208,8 +212,9 @@ td strong { color: var(--text); }
 .error-banner { margin-bottom: 16px; }
 .error-banner span { flex: 1; }
 .error-banner button { border: 0; color: var(--text); background: #ffffff0c; border-radius: 6px; padding: 6px 9px; cursor: pointer; }
-.job-list { display: grid; gap: 7px; }
+.job-list { display: grid; gap: 7px; max-height: 146px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .job-list button { display: grid; grid-template-columns: 10px 100px 1fr auto; align-items: center; gap: 9px; border: 1px solid var(--line-soft); background: #09110e; color: var(--muted); border-radius: 8px; min-height: 44px; padding: 0 11px; cursor: pointer; text-align: left; }
+.job-list button.selected { border-color: #6f9c39; background: #b9f35a0b; }
 .job-list strong { color: var(--text); text-transform: capitalize; }
 .job-status { width: 7px; height: 7px; border-radius: 50%; background: #65756d; }
 .job-status.running { background: var(--amber); box-shadow: 0 0 10px var(--amber); }

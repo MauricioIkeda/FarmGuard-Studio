@@ -288,14 +288,45 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
   </div>;
 }
 
+function OperationTerminal({ job }: { job?: Job }) {
+  const output = useRef<HTMLPreElement>(null);
+  const pinned = useRef(true);
+  const previousJob = useRef<string | undefined>(undefined);
+  const [cleared, setCleared] = useState<{ jobId: string; through: number } | null>(null);
+  const count = job?.logCount ?? job?.logs.length ?? 0;
+  const offset = count - (job?.logs.length ?? 0);
+  const hidden = cleared?.jobId === job?.id ? Math.max(0, (cleared?.through ?? 0) - offset) : 0;
+  const visibleLogs = job?.logs.slice(hidden) || [];
+  useLayoutEffect(() => {
+    if (previousJob.current !== job?.id) {
+      previousJob.current = job?.id;
+      pinned.current = true;
+    }
+    if (pinned.current && output.current) output.current.scrollTop = output.current.scrollHeight;
+  }, [job?.id, count, cleared]);
+  return <article className="panel terminal-panel">
+    <div className="panel-head"><div><span className="eyebrow">Saída em tempo real</span><h2>{job ? `${job.type} · ${job.status}` : 'Nenhuma tarefa nesta sessão'}</h2></div><div className="terminal-actions">{job && <button className="secondary-button" onClick={() => { setCleared({ jobId: job.id, through: count }); pinned.current = true; }} disabled={!job.logs.length}>Limpar terminal</button>}{job && <StatusPill tone={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'running' ? 'warning' : 'neutral'}>{job.status}</StatusPill>}</div></div>
+    <div className="terminal"><div className="terminal-chrome"><i /><i /><i /></div><pre ref={output} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 28; }}>{job ? (visibleLogs.length ? visibleLogs.join('\n') : cleared?.jobId === job.id ? 'Terminal limpo. Novas mensagens aparecerão aqui.' : `$ ${job.command.join(' ')}\n\nAguardando saída…`) : 'As mensagens de treino e avaliação aparecerão aqui.'}</pre></div>
+  </article>;
+}
+
 function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview; onRefresh: () => Promise<void>; onOpenAnnotation: (key: string) => void }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [type, setType] = useState<Job['type']>('validate');
   const [model, setModel] = useState(data.models[0]?.path || '');
   const [name, setName] = useState('');
   const [ignoreRegions, setIgnoreRegions] = useState(false);
   const [message, setMessage] = useState('');
-  const loadJobs = useCallback(async () => setJobs(await api.jobs()), []);
+  const loadJobs = useCallback(async () => {
+    const loaded = await api.jobs();
+    setJobs((current) => {
+      const byId = new Map(loaded.map((job) => [job.id, job]));
+      current.forEach((job) => byId.set(job.id, job));
+      return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    });
+  }, []);
   useEffect(() => {
     void loadJobs();
     const events = new EventSource('/api/jobs-stream');
@@ -307,13 +338,18 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
     return () => events.close();
   }, [loadJobs, onRefresh]);
   const submit = async () => {
+    if (submitting || jobs.some((job) => job.status === 'queued' || job.status === 'running')) return;
+    setSubmitting(true);
     setMessage('');
     try {
       const job = await api.createJob(type, { model, name, ignoreRegions: (type === 'train' || type === 'validate') && ignoreRegions });
-      setJobs((current) => [job, ...current]);
+      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      setSelectedJobId(job.id);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar.'); }
+    finally { setSubmitting(false); }
   };
-  const active = jobs.find((job) => job.status === 'running') || jobs[0];
+  const busy = submitting || jobs.some((job) => job.status === 'queued' || job.status === 'running');
+  const active = jobs.find((job) => job.id === selectedJobId) || jobs.find((job) => job.status === 'running') || jobs[0];
   return <>
     <PageTitle eyebrow="Central de execução" title="Do clique ao log, sem trocar de tela" description="Prepare treinos, validações, predições e calibrações com os pesos já catalogados." />
     {!data.operationsEnabled && <div className="safety-banner"><ShieldCheck /><div><strong>Proteção de escrita ativa</strong><p>Os comandos estão montados, mas não serão executados enquanto a autorização de escrita no FarmGuard estiver desativada.</p></div></div>}
@@ -323,22 +359,19 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
         <label>Tipo de operação</label>
         <div className="operation-types">{([
           ['train', 'Treinar', Activity], ['validate', 'Validar', Check], ['predict', 'Predizer', ImageIcon], ['tune', 'Calibrar', SlidersHorizontal], ['dataset', 'Gerar YOLO', Database], ['drive', 'Backup Drive', Cloud],
-        ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
+        ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} disabled={busy} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
         {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">Pesos / checkpoint</label>
-        <select id="model" value={model} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
-        {(type === 'train' || type === 'predict' || (type === 'validate' && ignoreRegions)) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} onChange={(event) => setName(event.target.value)} /></>}
-        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; o fluxo comum continua disponível. As áreas precisam estar publicadas no FarmGuard. Se as boxes mudaram, gere o DatasetYolo antes.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino experimental desativa aumentos geométricos e exige Ultralytics 8.4.161. Use os resultados para comparação, não como substituição automática do modelo promovido.</span></div>}</>}
+        <select id="model" value={model} disabled={busy} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
+        {(type === 'train' || type === 'predict' || (type === 'validate' && ignoreRegions)) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></>}
+        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} disabled={busy} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; o fluxo comum continua disponível. As áreas precisam estar publicadas no FarmGuard. Se as boxes mudaram, gere o DatasetYolo antes.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino experimental desativa aumentos geométricos e exige Ultralytics 8.4.161. Use os resultados para comparação, não como substituição automática do modelo promovido.</span></div>}</>}
         {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para o conjunto de <strong>validação YOLO atual</strong>. O lote aparecerá em Experimentos → Galerias de predição.</span></div>}
         <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
         {message && <div className="inline-error"><CircleAlert />{message}</div>}
-        <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled}><Play />{data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
+        <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled || busy}><Play />{busy ? 'Operação em andamento' : data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
       </article>
-      <article className="panel terminal-panel">
-        <div className="panel-head"><div><span className="eyebrow">Saída em tempo real</span><h2>{active ? `${active.type} · ${active.status}` : 'Nenhuma tarefa nesta sessão'}</h2></div>{active && <StatusPill tone={active.status === 'completed' ? 'success' : active.status === 'failed' ? 'danger' : active.status === 'running' ? 'warning' : 'neutral'}>{active.status}</StatusPill>}</div>
-        <div className="terminal"><div className="terminal-chrome"><i /><i /><i /></div><pre>{active ? (active.logs.length ? active.logs.join('\n') : `$ ${active.command.join(' ')}\n\nAguardando saída…`) : 'As mensagens de treino e avaliação aparecerão aqui.'}</pre></div>
-      </article>
+      <OperationTerminal job={active} />
     </section>
-    <section className="panel"><div className="panel-head"><div><span className="eyebrow">Sessão atual</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} onClick={() => setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada nesta sessão.</Empty>}</section>
+    <section className="panel"><div className="panel-head"><div><span className="eyebrow">Sessão atual</span><h2>Histórico de operações</h2></div></div>{jobs.length ? <div className="job-list">{jobs.map((job) => <button key={job.id} className={active?.id === job.id ? 'selected' : ''} onClick={() => setSelectedJobId(job.id)}><span className={`job-status ${job.status}`} /> <strong>{job.type}</strong><span>{date(job.createdAt)}</span><StatusPill>{job.status}</StatusPill></button>)}</div> : <Empty>Nenhuma operação foi iniciada nesta sessão.</Empty>}</section>
     <PublicationPanel data={data} onUpdated={async () => { await loadJobs(); await onRefresh(); }} onOpenAnnotation={onOpenAnnotation} />
   </>;
 }
