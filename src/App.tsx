@@ -34,6 +34,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from './api';
+import { mergeJobs } from './job-sync';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { DatasetSplitPage } from './components/DatasetSplitPage';
 import { MetricChart } from './components/MetricChart';
@@ -321,18 +322,15 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
   const [message, setMessage] = useState('');
   const loadJobs = useCallback(async () => {
     const loaded = await api.jobs();
-    setJobs((current) => {
-      const byId = new Map(loaded.map((job) => [job.id, job]));
-      current.forEach((job) => byId.set(job.id, job));
-      return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    });
+    setJobs((current) => mergeJobs(current, loaded));
   }, []);
   useEffect(() => {
-    void loadJobs();
+    void loadJobs().catch(() => {});
     const events = new EventSource('/api/jobs-stream');
+    events.onopen = () => { void loadJobs().catch(() => {}); };
     events.onmessage = (event) => {
       const changed = JSON.parse(event.data) as Job;
-      setJobs((current) => [changed, ...current.filter((job) => job.id !== changed.id)]);
+      setJobs((current) => mergeJobs(current, [changed]));
       if (['completed', 'failed'].includes(changed.status)) void onRefresh();
     };
     return () => events.close();
@@ -343,12 +341,17 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
     setMessage('');
     try {
       const job = await api.createJob(type, { model, name, ignoreRegions: (type === 'train' || type === 'validate') && ignoreRegions });
-      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      setJobs((current) => mergeJobs(current, [job]));
       setSelectedJobId(job.id);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar.'); }
     finally { setSubmitting(false); }
   };
   const busy = submitting || jobs.some((job) => job.status === 'queued' || job.status === 'running');
+  useEffect(() => {
+    if (!busy) return;
+    const timer = window.setInterval(() => { void loadJobs().catch(() => {}); }, 2500);
+    return () => window.clearInterval(timer);
+  }, [busy, loadJobs]);
   const active = jobs.find((job) => job.id === selectedJobId) || jobs.find((job) => job.status === 'running') || jobs[0];
   return <>
     <PageTitle eyebrow="Central de execução" title="Do clique ao log, sem trocar de tela" description="Prepare treinos, validações, predições e calibrações com os pesos já catalogados." />
