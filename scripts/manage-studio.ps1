@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Start', 'Restart', 'Stop', 'Status')]
+    [ValidateSet('Start', 'Restart', 'Stop', 'Status', 'ChangePassword')]
     [string]$Action = 'Status'
 )
 
@@ -9,6 +9,8 @@ $serverEntry = Join-Path $studioRoot 'dist-server\server\index.js'
 $tunnelTokenFile = Join-Path $studioRoot 'data\secrets\cloudflare.token'
 $startScript = Join-Path $PSScriptRoot 'start-background.ps1'
 $publicUrl = 'https://farmguard.dominiofoda.com.br/'
+$envFile = Join-Path $studioRoot '.env'
+. (Join-Path $PSScriptRoot 'password-utils.ps1')
 
 function Get-StudioServerProcesses {
     @(Get-CimInstance Win32_Process | Where-Object {
@@ -96,9 +98,35 @@ function Start-Studio {
     Write-Host 'Studio iniciado.'
 }
 
+function Change-StudioPassword {
+    if ((Test-Path Env:ADMIN_PASSWORD) -or (Test-Path Env:SESSION_SECRET)) {
+        throw 'ADMIN_PASSWORD ou SESSION_SECRET esta definida fora do .env. Remova a variavel externa antes de trocar a senha.'
+    }
+    Write-Host 'Digite a nova senha do Studio (minimo de 12 caracteres).'
+    $password = $null
+    $confirmation = $null
+    try {
+        $password = Read-Host 'Nova senha' -AsSecureString
+        $confirmation = Read-Host 'Confirme a nova senha' -AsSecureString
+        Set-StudioPassword -EnvPath $envFile -Password $password -Confirmation $confirmation
+    } finally {
+        if ($password) { $password.Dispose() }
+        if ($confirmation) { $confirmation.Dispose() }
+    }
+    Write-Host 'Senha alterada. Sessoes anteriores foram invalidadas.'
+    if (@(Get-StudioServerProcesses).Count -or @(Get-StudioTunnelProcesses).Count) {
+        Stop-Studio
+        Start-Studio
+        Show-Status
+    } else {
+        Write-Host 'O Studio esta desligado. A nova senha valera na proxima inicializacao.'
+    }
+}
+
 switch ($Action) {
     'Start' { Start-Studio; Show-Status }
     'Restart' { Stop-Studio; Start-Studio; Show-Status }
     'Stop' { Stop-Studio; Show-Status }
     'Status' { Show-Status }
+    'ChangePassword' { Change-StudioPassword }
 }

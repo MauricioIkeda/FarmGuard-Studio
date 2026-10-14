@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationSummary, AuthStatus, CameraTest, DatasetImage, Job, Overview, PublicationChange } from './types';
+import type { Annotation, AnnotationSummary, AuthStatus, CameraTest, DatasetImage, Job, Overview, PredictionDetections, PublicationChange } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -20,7 +20,12 @@ export const api = {
     }),
   logout: () => request<AuthStatus>('/api/auth/logout', { method: 'POST' }),
   overview: () => request<Overview>('/api/overview'),
-  promoteModel: (modelId: string) => request<{ name: string; modelId: string; confidence: number; nmsIou: number; backupRoot: string }>('/api/models/promote', {
+  calibrationPreview: (image: string, selections: Array<{ modelId: string; confidence: number; iou: number }>) =>
+    request<{ id: string; image: string; results: Array<{ width: number; height: number; detections: number;
+      boxes: Array<{ xyxy: number[]; confidence: number }>; url: string }> }>('/api/calibration/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, selections }),
+    }),
+  promoteModel: (modelId: string) => request<{ name: string; modelId: string; confidence: number; nmsIou: number; backupRoot: string; iaApiWarning?: string }>('/api/models/promote', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modelId, confirmation: 'PROMOVER' }),
   }),
@@ -34,8 +39,8 @@ export const api = {
   },
   discardCameraTest: (id: string) => fetch(`/api/camera-test/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   datasetSplit: () => request<DatasetImage[]>('/api/dataset/split'),
-  moveDatasetTrap: (trap: string, split: 'train' | 'val') => request<DatasetImage[]>('/api/dataset/split', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trap, split }),
+  moveDatasetImage: (image: string, split: 'train' | 'val') => request<DatasetImage[]>('/api/dataset/split', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, split }),
   }),
   reapplyDatasetSplit: () => request<DatasetImage[]>('/api/dataset/split/reapply', { method: 'POST' }),
   annotations: () => request<AnnotationSummary[]>('/api/annotations'),
@@ -67,6 +72,8 @@ export const api = {
     }),
   predictionFiles: (group: string) =>
     request<string[]>(`/api/predictions/${encodeURIComponent(group)}`),
+  predictionDetections: (group: string, file: string) =>
+    request<PredictionDetections>(`/api/predictions/${encodeURIComponent(group)}/${encodeURIComponent(file)}/detections`),
   publicationPlan: () => request<PublicationChange[]>('/api/publication/plan'),
   publishDrafts: (keys: string[], rebuild = false) =>
     request<{ published: string[]; imagesAdded: string[]; driveBackedUp: number; driveErrors: string[]; backupRoot: string; job: Job | null }>('/api/publication/publish', {

@@ -30,10 +30,13 @@ export const config = {
   driveRoot: process.env.INSECT_AI_DRIVE_ROOT || 'Insect AI Datasets',
   rclonePath: process.env.INSECT_AI_RCLONE_PATH || '',
   rcloneConfig: process.env.INSECT_AI_RCLONE_CONFIG || '',
+  iaApiInternalUrl: process.env.IA_API_INTERNAL_URL || '',
+  iaApiInternalToken: process.env.IA_API_INTERNAL_TOKEN || '',
 };
 
 export const farmPaths = {
   ia: path.join(config.farmGuardRoot, 'Iazinha'),
+  datasets: path.join(config.farmGuardRoot, 'Iazinha', 'Datasets'),
   training: path.join(config.farmGuardRoot, 'Iazinha', 'Training'),
   runs: path.join(config.farmGuardRoot, 'Iazinha', 'Training', 'runs'),
   predictions: path.join(
@@ -43,12 +46,13 @@ export const farmPaths = {
     'predictions',
   ),
   models: path.join(config.farmGuardRoot, 'Iazinha', 'Models'),
-  yolo: path.join(config.farmGuardRoot, 'Iazinha', 'DatasetYolo'),
+  yolo: path.join(config.farmGuardRoot, 'Iazinha', 'Datasets', 'datasetUnimar', 'DatasetYolo'),
   annotationRoot: path.join(
     config.farmGuardRoot,
     'Iazinha',
-    'DatasetCreator',
-    'Insect AI Datasets',
+    'Datasets',
+    'datasetUnimar',
+    'source',
     'traps_events',
   ),
 };

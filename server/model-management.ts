@@ -14,9 +14,13 @@ export type Calibration = {
   modelId: string;
   modelFingerprint: string;
   datasetSignature: string;
+  mode?: 'automatic' | 'manual';
   calibratedAt: string;
   best: ThresholdRow;
   rows: ThresholdRow[];
+  confidenceGrid?: number[];
+  nmsIouGrid?: number[];
+  testedPairs?: number;
 };
 
 export type CalibrationContext = {
@@ -25,6 +29,7 @@ export type CalibrationContext = {
   modelFingerprint: string;
   datasetSignature: string;
   output: string;
+  mode?: 'automatic' | 'manual';
 };
 
 const calibrationRoot = path.join(config.dataRoot, 'calibrations');
@@ -138,14 +143,22 @@ export async function finishCalibration(context: CalibrationContext) {
     modelId: context.modelId,
     modelFingerprint: context.modelFingerprint,
     datasetSignature: context.datasetSignature,
+    mode: context.mode || 'automatic',
     calibratedAt: new Date().toISOString(),
-    best: rows[0], rows,
+    best: rows[0], rows: rows.slice(0, 20),
+    confidenceGrid: [...new Set(rows.map((row) => row.confidence))].sort((a, b) => a - b),
+    nmsIouGrid: [...new Set(rows.map((row) => row.nms_iou))].sort((a, b) => a - b),
+    testedPairs: rows.length,
   };
   await fs.mkdir(calibrationRoot, { recursive: true });
   const target = calibrationPath(context.modelId);
   const temporary = `${target}.${process.pid}.tmp`;
   await fs.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
   await fs.rename(temporary, target);
+  const sweepRoot = path.join(calibrationRoot, 'sweeps');
+  if (path.dirname(path.resolve(context.output)) === sweepRoot && /^[a-f0-9-]{36}\.csv$/i.test(path.basename(context.output))) {
+    await fs.unlink(context.output).catch(() => {});
+  }
   return record;
 }
 
@@ -163,6 +176,16 @@ export async function promotedModel() {
     return { name: document.name || 'insect-detector', sourceModelId: document.promotion?.source_model_id || null };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+export async function isPromotedCopy(sourcePath: string) {
+  try {
+    const [source, promoted] = await Promise.all([sha256(sourcePath), sha256(promotedWeight)]);
+    return source === promoted;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
   }
 }
@@ -243,9 +266,9 @@ export async function promoteModel(modelId: string) {
       inference_calibration: {
         purpose: 'preannotation_edit_efficiency',
         match_iou: calibration.best.match_iou,
-        selection: 'lowest_fp_plus_fn_then_highest_f1',
-        confidence_grid: [...new Set(calibration.rows.map((row) => row.confidence))].sort((a, b) => a - b),
-        nms_iou_grid: [...new Set(calibration.rows.map((row) => row.nms_iou))].sort((a, b) => a - b),
+        selection: calibration.mode === 'manual' ? 'manual_review' : 'lowest_fp_plus_fn_then_highest_f1',
+        confidence_grid: calibration.confidenceGrid || [...new Set(calibration.rows.map((row) => row.confidence))].sort((a, b) => a - b),
+        nms_iou_grid: calibration.nmsIouGrid || [...new Set(calibration.rows.map((row) => row.nms_iou))].sort((a, b) => a - b),
         selected: calibration.best,
       },
       promotion: {

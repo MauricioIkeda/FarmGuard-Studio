@@ -39,19 +39,26 @@ import { api } from './api';
 import { mergeJobs } from './job-sync';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { DatasetSplitPage } from './components/DatasetSplitPage';
-import { PredictionComparison } from './components/PredictionComparison';
+import { CalibrationPage } from './components/CalibrationPage';
 import { MetricChart } from './components/MetricChart';
 import { ModelsPage } from './components/ModelsPage';
 import { CameraTestPage } from './components/CameraTestPage';
-import type { Annotation, AnnotationSummary, Job, Overview, PublicationChange, Run } from './types';
+import type { Annotation, AnnotationSummary, Job, Overview, PredictionDetections, PublicationChange, Run } from './types';
 
-type Page = 'overview' | 'experiments' | 'models' | 'camera' | 'operations' | 'dataset' | 'annotator';
+type Page = 'overview' | 'experiments' | 'models' | 'calibration' | 'camera' | 'operations' | 'dataset' | 'annotator';
 
 const number = new Intl.NumberFormat('pt-BR');
 const percent = (value: number) => `${(value * 100).toFixed(1).replace('.', ',')}%`;
 const date = (value: string) =>
   new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 const size = (value: number) => `${(value / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
+const yolo11Bases = [
+  ['yolo11n.pt', 'Nano'],
+  ['yolo11s.pt', 'Small'],
+  ['yolo11m.pt', 'Medium'],
+  ['yolo11l.pt', 'Large'],
+  ['yolo11x.pt', 'XLarge'],
+] as const;
 
 function StatusPill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: string }) {
   return <span className={`status-pill ${tone}`}>{children}</span>;
@@ -67,6 +74,7 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
     return key && /^[a-f0-9-]{36}$/i.test(key) ? key : null;
   });
   const [page, setPage] = useState<Page>(annotationTarget ? 'annotator' : 'overview');
+  const [calibrationModelId, setCalibrationModelId] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -100,6 +108,11 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const openCalibration = (modelId: string) => {
+    setCalibrationModelId(modelId);
+    navigate('calibration');
+  };
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
@@ -112,6 +125,7 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'overview' ? 'active' : ''} onClick={() => navigate('overview')}><Gauge />Visão geral</button>
           <button className={page === 'experiments' ? 'active' : ''} onClick={() => navigate('experiments')}><FlaskConical />Experimentos</button>
           <button className={page === 'models' ? 'active' : ''} onClick={() => navigate('models')}><Crown />Modelos</button>
+          <button className={page === 'calibration' ? 'active' : ''} onClick={() => navigate('calibration')}><SlidersHorizontal />Calibração</button>
           <button className={page === 'camera' ? 'active' : ''} onClick={() => navigate('camera')}><Camera />Teste com câmera</button>
           <button className={page === 'operations' ? 'active' : ''} onClick={() => navigate('operations')}><TerminalSquare />Operações</button>
           <button className={page === 'dataset' ? 'active' : ''} onClick={() => navigate('dataset')}><Database />Dataset</button>
@@ -139,7 +153,8 @@ function StudioApp({ onLogout }: { onLogout: () => void }) {
           {loading && !overview ? <div className="loading-page"><LoaderCircle className="spin" />Lendo o laboratório…</div> : null}
           {overview && page === 'overview' && <OverviewPage data={overview} onNavigate={navigate} />}
           {overview && page === 'experiments' && <ExperimentsPage data={overview} />}
-          {overview && page === 'models' && <ModelsPage data={overview} onRefresh={load} onOperations={() => navigate('operations')} />}
+          {overview && page === 'models' && <ModelsPage data={overview} onRefresh={load} onOperations={() => navigate('operations')} onCalibrate={openCalibration} />}
+          {overview && page === 'calibration' && <CalibrationPage data={overview} initialModelId={calibrationModelId} onRefresh={load} onOperations={() => navigate('operations')} />}
           {overview && page === 'camera' && <CameraTestPage data={overview} />}
           {overview && page === 'operations' && <OperationsPage data={overview} onRefresh={load} onOpenAnnotation={openAnnotation} />}
           {overview && page === 'dataset' && <DatasetSplitPage operationsEnabled={overview.operationsEnabled} onUpdated={load} />}
@@ -215,13 +230,6 @@ function ExperimentsPage({ data }: { data: Overview }) {
       </article>)}
     </section>
     <section className="panel">
-      <div className="panel-head"><div><span className="eyebrow">Calibração</span><h2>Melhores combinações de threshold</h2></div><StatusPill>{data.thresholds.length} testes lidos</StatusPill></div>
-      {data.thresholds.length ? <div className="table-wrap"><table><thead><tr><th>Confiança</th><th>NMS IoU</th><th>Precisão</th><th>Recall</th><th>F1</th><th>TP</th><th>FP</th><th>FN</th><th>Edições estimadas</th></tr></thead><tbody>
-        {data.thresholds.slice(0, 8).map((row, index) => <tr key={index}><td><strong>{Number(row.confidence).toFixed(2)}</strong></td><td>{Number(row.nms_iou).toFixed(2)}</td><td>{percent(Number(row.precision))}</td><td>{percent(Number(row.recall))}</td><td><span className="metric-value">{percent(Number(row.f1))}</span></td><td>{row.tp}</td><td>{row.fp}</td><td>{row.fn}</td><td>{row.edit_proxy}</td></tr>)}
-      </tbody></table></div> : <Empty>Nenhum sweep de thresholds encontrado.</Empty>}
-    </section>
-    <PredictionComparison predictions={data.predictions} />
-    <section className="panel">
       <div className="panel-head"><div><span className="eyebrow">Inspeção visual</span><h2>Galerias de predição</h2></div><StatusPill>{data.predictions.length} lotes</StatusPill></div>
       <div className="prediction-grid">{data.predictions.map((prediction) => <button key={prediction.name} className="prediction-card" onClick={() => void openGallery(prediction.name)}>
         <div className="prediction-preview">{prediction.preview ? <img src={`/api/predictions/${encodeURIComponent(prediction.name)}/${encodeURIComponent(prediction.preview)}`} alt="" /> : <ImageIcon />}</div><div><strong>{prediction.name}</strong><span>{prediction.count} imagens · {date(prediction.modifiedAt)}</span></div><ChevronRight />
@@ -235,10 +243,23 @@ function ExperimentsPage({ data }: { data: Overview }) {
 function PredictionViewer({ group, file, onClose }: { group: string; file: string; onClose: () => void }) {
   const [zoom, setZoom] = useState(1);
   const [fitWidth, setFitWidth] = useState(0);
+  const [detections, setDetections] = useState<PredictionDetections | null | undefined>(undefined);
+  const [cleanBoxes, setCleanBoxes] = useState(false);
   const viewport = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ distance: number; x: number; y: number } | null>(null);
   const zoomAnchor = useRef<{ x: number; y: number; imageX: number; imageY: number } | null>(null);
+  useEffect(() => {
+    let current = true;
+    setDetections(undefined);
+    setCleanBoxes(false);
+    void api.predictionDetections(group, file).then((result) => {
+      if (current) { setDetections(result); setCleanBoxes(true); }
+    }).catch(() => { if (current) setDetections(null); });
+    return () => { current = false; };
+  }, [group, file]);
   const zoomAt = (factor: number, x?: number, y?: number) => {
     const element = viewport.current;
     const img = image.current;
@@ -253,7 +274,7 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
       imageY: Math.max(0, Math.min(1, (cursorY - imageBounds.top) / imageBounds.height)),
     };
     setZoom((value) => {
-      const next = Math.max(1, Math.min(6, value * factor));
+      const next = Math.max(1, Math.min(64, value * factor));
       if (next === value) zoomAnchor.current = null;
       return next;
     });
@@ -275,11 +296,19 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
       event.preventDefault(); event.stopPropagation();
       zoomAt(Math.exp(-event.deltaY * 0.001), event.clientX, event.clientY);
     };
+    const stopPageGesture = (event: Event) => event.preventDefault();
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
     element.addEventListener('wheel', wheel, { passive: false });
+    element.addEventListener('gesturestart', stopPageGesture, { passive: false });
+    element.addEventListener('gesturechange', stopPageGesture, { passive: false });
     window.addEventListener('keydown', key);
-    return () => { element.removeEventListener('wheel', wheel); window.removeEventListener('keydown', key); };
-  }, [onClose]);
+    return () => {
+      element.removeEventListener('wheel', wheel);
+      element.removeEventListener('gesturestart', stopPageGesture);
+      element.removeEventListener('gesturechange', stopPageGesture);
+      window.removeEventListener('keydown', key);
+    };
+  }, [onClose, detections]);
   useEffect(() => {
     const element = viewport.current;
     if (!element) return;
@@ -292,10 +321,52 @@ function PredictionViewer({ group, file, onClose }: { group: string; file: strin
     observer.observe(element);
     fit();
     return () => observer.disconnect();
-  }, []);
+  }, [detections]);
+  const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    element.setPointerCapture(event.pointerId);
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      drag.current = null;
+    } else if (pointers.current.size === 1) {
+      drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop };
+    }
+  };
+  const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!pointers.current.has(event.pointerId)) return;
+    const element = event.currentTarget;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const x = (a.x + b.x) / 2;
+      const y = (a.y + b.y) / 2;
+      if (pinch.current) {
+        element.scrollLeft -= x - pinch.current.x;
+        element.scrollTop -= y - pinch.current.y;
+        zoomAt(distance / Math.max(1, pinch.current.distance), x, y);
+      }
+      pinch.current = { distance, x, y };
+    } else if (drag.current) {
+      element.scrollLeft = drag.current.left - (event.clientX - drag.current.x);
+      element.scrollTop = drag.current.top - (event.clientY - drag.current.y);
+    }
+  };
+  const pointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    pointers.current.delete(event.pointerId);
+    pinch.current = null;
+    const remaining = [...pointers.current.values()][0];
+    drag.current = remaining ? { x: remaining.x, y: remaining.y,
+      left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop } : null;
+  };
+  const baseUrl = `/api/predictions/${encodeURIComponent(group)}/${encodeURIComponent(file)}`;
   return <div className="prediction-viewer" role="dialog" aria-modal="true" aria-label={`Predição ${file}`}>
-    <div className="prediction-viewer-toolbar"><strong>{file}</strong><div><button className="icon-button" aria-label="Diminuir zoom" onClick={() => zoomAt(1 / 1.4)}><Minus /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="Aumentar zoom" onClick={() => zoomAt(1.4)}><Plus /></button><button className="icon-button" aria-label="Fechar imagem" onClick={onClose}><X /></button></div></div>
-    <div className="prediction-viewer-image" ref={viewport} onPointerDown={(event) => { if (event.pointerType !== 'mouse') return; event.currentTarget.setPointerCapture(event.pointerId); drag.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; }} onPointerMove={(event) => { if (!drag.current) return; event.currentTarget.scrollLeft = drag.current.left - (event.clientX - drag.current.x); event.currentTarget.scrollTop = drag.current.top - (event.clientY - drag.current.y); }} onPointerUp={() => { drag.current = null; }}><img ref={image} onLoad={() => { const element = viewport.current; const img = image.current; if (element && img) setFitWidth(Math.min(element.clientWidth / img.naturalWidth, element.clientHeight / img.naturalHeight) * img.naturalWidth); }} src={`/api/predictions/${encodeURIComponent(group)}/${encodeURIComponent(file)}`} alt={`Predição ${file}`} style={{ width: fitWidth ? `${fitWidth * zoom}px` : 'auto' }} /></div>
+    <div className="prediction-viewer-toolbar"><strong>{file}</strong><div>{detections && <div className="prediction-layer-toggle" role="group" aria-label="Visualização de boxes"><button className={!cleanBoxes ? 'active' : ''} onClick={() => setCleanBoxes(false)}>IA original</button><button className={cleanBoxes ? 'active' : ''} onClick={() => setCleanBoxes(true)}>Boxes limpas</button></div>}<button className="icon-button" aria-label="Diminuir zoom" onClick={() => zoomAt(1 / 1.4)}><Minus /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="Aumentar zoom" onClick={() => zoomAt(1.4)}><Plus /></button><button className="icon-button" aria-label="Fechar imagem" onClick={onClose}><X /></button></div></div>
+    {detections === undefined && <div className="prediction-viewer-loading"><LoaderCircle className="spin" />Preparando visualização…</div>}
+    {detections === null && <div className="prediction-viewer-note">Esta galeria antiga tem apenas a imagem renderizada. Faça uma nova predição para alternar as boxes.</div>}
+    {detections !== undefined && <div className="prediction-viewer-image" ref={viewport} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}><div className="prediction-viewer-content" style={{ width: fitWidth ? `${fitWidth * zoom}px` : 'auto' }}><img ref={image} onLoad={() => { const element = viewport.current; const img = image.current; if (element && img) setFitWidth(Math.min(element.clientWidth / img.naturalWidth, element.clientHeight / img.naturalHeight) * img.naturalWidth); }} src={cleanBoxes && detections ? `${baseUrl}/original` : baseUrl} alt={`Predição ${file}`} />{cleanBoxes && detections && <svg className="prediction-box-layer" viewBox={`0 0 ${detections.width} ${detections.height}`} preserveAspectRatio="none" aria-hidden="true">{detections.boxes.map((box, index) => <rect key={index} x={box.x1} y={box.y1} width={box.x2 - box.x1} height={box.y2 - box.y1} fill="none" stroke="#78f0cc" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />)}</svg>}</div></div>}
   </div>;
 }
 
@@ -308,6 +379,13 @@ function OperationTerminal({ job }: { job?: Job }) {
   const offset = count - (job?.logs.length ?? 0);
   const hidden = cleared?.jobId === job?.id ? Math.max(0, (cleared?.through ?? 0) - offset) : 0;
   const visibleLogs = job?.logs.slice(hidden) || [];
+  const emptyOutput = !job ? 'As mensagens de treino e avaliação aparecerão aqui.'
+    : cleared?.jobId === job.id ? 'Terminal limpo. Novas mensagens aparecerão aqui.'
+    : `$ ${job.command.join(' ')}\n\n${job.status === 'completed' ? 'Operação concluída com sucesso. Nenhuma saída adicional foi produzida.'
+      : job.status === 'failed' ? 'Operação encerrada com erro. Consulte o histórico desta tarefa.'
+      : job.status === 'cancelled' ? 'Operação cancelada.'
+      : job.status === 'interrupted' ? 'Acompanhamento interrompido.'
+      : 'Operação em andamento; aguardando a primeira atualização…'}`;
   useLayoutEffect(() => {
     if (previousJob.current !== job?.id) {
       previousJob.current = job?.id;
@@ -317,7 +395,7 @@ function OperationTerminal({ job }: { job?: Job }) {
   }, [job?.id, count, cleared]);
   return <article className="panel terminal-panel">
     <div className="panel-head"><div><span className="eyebrow">Saída em tempo real</span><h2>{job ? `${job.type} · ${job.status}` : 'Nenhuma tarefa nesta sessão'}</h2></div><div className="terminal-actions">{job && <button className="secondary-button" onClick={() => { setCleared({ jobId: job.id, through: count }); pinned.current = true; }} disabled={!job.logs.length}>Limpar terminal</button>}{job && <StatusPill tone={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'running' ? 'warning' : 'neutral'}>{job.status}</StatusPill>}</div></div>
-    <div className="terminal"><div className="terminal-chrome"><i /><i /><i /></div><pre ref={output} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 28; }}>{job ? (visibleLogs.length ? visibleLogs.join('\n') : cleared?.jobId === job.id ? 'Terminal limpo. Novas mensagens aparecerão aqui.' : `$ ${job.command.join(' ')}\n\nAguardando saída…`) : 'As mensagens de treino e avaliação aparecerão aqui.'}</pre></div>
+    <div className="terminal"><div className="terminal-chrome"><i /><i /><i /></div><pre ref={output} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 28; }}>{visibleLogs.length ? visibleLogs.join('\n') : emptyOutput}</pre></div>
   </article>;
 }
 
@@ -327,6 +405,8 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
   const [submitting, setSubmitting] = useState(false);
   const [type, setType] = useState<Job['type']>('validate');
   const [model, setModel] = useState(data.models[0]?.path || '');
+  const [trainingModel, setTrainingModel] = useState(data.models[0]?.path || 'yolo11s.pt');
+  const [dataset, setDataset] = useState('unimar');
   const [name, setName] = useState('');
   const [ignoreRegions, setIgnoreRegions] = useState(false);
   const [message, setMessage] = useState('');
@@ -350,7 +430,7 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
     setSubmitting(true);
     setMessage('');
     try {
-      const job = await api.createJob(type, { model, name, ignoreRegions: (type === 'train' || type === 'validate') && ignoreRegions });
+      const job = await api.createJob(type, { model: type === 'train' ? trainingModel : model, name, dataset, ignoreRegions: (type === 'train' || type === 'validate') && ignoreRegions });
       setJobs((current) => mergeJobs(current, [job]));
       setSelectedJobId(job.id);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar.'); }
@@ -364,22 +444,27 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
   }, [busy, loadJobs]);
   const active = jobs.find((job) => job.id === selectedJobId) || jobs.find((job) => job.status === 'running') || jobs[0];
   return <>
-    <PageTitle eyebrow="Central de execução" title="Do clique ao log, sem trocar de tela" description="Prepare treinos, validações, predições e calibrações com os pesos já catalogados." />
+    <PageTitle eyebrow="Central de execução" title="Do clique ao log, sem trocar de tela" description="Prepare treinos, validações, predições e calibrações com os pesos catalogados." />
     {!data.operationsEnabled && <div className="safety-banner"><ShieldCheck /><div><strong>Proteção de escrita ativa</strong><p>Os comandos estão montados, mas não serão executados enquanto a autorização de escrita no FarmGuard estiver desativada.</p></div></div>}
     <section className="operations-grid">
       <article className="panel operation-form">
         <div className="panel-head"><div><span className="eyebrow">Nova tarefa</span><h2>Configurar operação</h2></div></div>
         <label>Tipo de operação</label>
         <div className="operation-types">{([
-          ['train', 'Treinar', Activity], ['validate', 'Validar', Check], ['predict', 'Predizer', ImageIcon], ['tune', 'Calibrar', SlidersHorizontal], ['dataset', 'Gerar YOLO', Database], ['drive', 'Backup Drive', Cloud],
+          ['train', 'Treinar', Activity], ['validate', 'Validar', Check], ['predict', 'Predizer', ImageIcon], ['tune', 'Calibrar automático', SlidersHorizontal], ['dataset', 'Gerar YOLO', Database], ['drive', 'Backup Unimar', Cloud], ['drive-datasets', 'Backup datasets', UploadCloud],
         ] as const).map(([value, label, Icon]) => <button key={value} className={type === value ? 'active' : ''} disabled={busy} onClick={() => setType(value)}><Icon />{label}</button>)}</div>
-        {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">Pesos / checkpoint</label>
-        <select id="model" value={model} disabled={busy} onChange={(event) => setModel(event.target.value)}>{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</select></>}
+        {['train', 'validate', 'predict', 'tune'].includes(type) && <><label htmlFor="model">{type === 'train' ? 'Base / checkpoint inicial' : 'Pesos / checkpoint'}</label>
+        <select id="model" value={type === 'train' ? trainingModel : model} disabled={busy} onChange={(event) => type === 'train' ? setTrainingModel(event.target.value) : setModel(event.target.value)}>
+          {type === 'train' && <optgroup label="Bases oficiais YOLO11 · pré-treinadas">{yolo11Bases.map(([path, label]) => <option key={path} value={path}>YOLO11 {label} · {path}</option>)}</optgroup>}
+          <optgroup label="Checkpoints do FarmGuard">{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</optgroup>
+        </select>
+        {type === 'train' && <div className="operation-note"><CircleAlert /><span>As bases YOLO11 .pt já vêm pré-treinadas; cada treino cria uma nova execução para o dataset escolhido. No primeiro uso, o peso pode ser baixado. Medium, Large e XLarge podem exceder os 6 GB de VRAM desta máquina com o lote e a resolução atuais.</span></div>}</>}
+        {(type === 'train' || type === 'validate') && <><label htmlFor="training-dataset">Dataset</label><select id="training-dataset" value={dataset} disabled={busy} onChange={(event) => { setDataset(event.target.value); if (event.target.value !== 'unimar') setIgnoreRegions(false); }}><option value="unimar">Unimar · fotos da faculdade</option><option value="yellow">Yellow · armadilhas amarelas (externo)</option><option value="stickyPi">Sticky Pi · armadilhas adesivas (externo)</option></select></>}
         {(type === 'train' || type === 'predict' || (type === 'validate' && ignoreRegions)) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></>}
-        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} disabled={busy} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; o fluxo comum continua disponível. As áreas precisam estar publicadas no FarmGuard. Se as boxes mudaram, gere o DatasetYolo antes.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino com ignore mantém a aumentação padrão e transforma a máscara junto com a imagem. Requer Ultralytics 8.4.161 e não promove o modelo automaticamente.</span></div>}</>}
-        {type === 'tune' && <div className="operation-note"><SlidersHorizontal /><span>O Studio testa a grade de confiança e NMS IoU no split de validação. O melhor ajuste é salvo no catálogo deste peso, considerando o menor total de falsos positivos e insetos perdidos.</span></div>}
+        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} disabled={busy || dataset !== 'unimar'} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Disponível somente para o Unimar. Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; as áreas precisam estar publicadas e o YOLO atualizado.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino com ignore mantém a aumentação padrão e transforma a máscara junto com a imagem. Requer Ultralytics 8.4.161 e não promove o modelo automaticamente.</span></div>}</>}
+        {type === 'tune' && <div className="operation-note"><SlidersHorizontal /><span>O Studio testa 9.801 combinações de confiança e NMS IoU, em passos de 0,01, nas imagens de validação Unimar. O melhor ajuste fica salvo no catálogo deste peso; o modelo principal não muda até ser promovido novamente.</span></div>}
         {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para a <strong>validação YOLO atual</strong>, usando sua calibração salva quando existir; caso contrário, confiança 0,20 e NMS IoU 0,40. O lote aparecerá em Experimentos.</span></div>}
-        <div className="operation-note"><Database /><span>Dataset atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</span></div>
+        <div className="operation-note"><Database /><span>{type === 'drive-datasets' ? 'Espelha a pasta Datasets inteira no Drive, com Yellow, Sticky Pi e Unimar. Arquivos remotos substituídos ou removidos ficam em Datasets-history para recuperação.' : dataset === 'unimar' || !['train', 'validate'].includes(type) ? <>Dataset Unimar atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</> : 'Dataset externo selecionado: use-o para pré-treino; compare o modelo final nas fotos Unimar antes de promovê-lo.'}</span></div>
         {message && <div className="inline-error"><CircleAlert />{message}</div>}
         <button className="primary-button full" onClick={() => void submit()} disabled={!data.operationsEnabled || busy}><Play />{busy ? 'Operação em andamento' : data.operationsEnabled ? 'Iniciar operação' : 'Aguardando autorização'}</button>
       </article>
@@ -416,13 +501,27 @@ function PublicationPanel({ data, onUpdated, onOpenAnnotation }: { data: Overvie
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  const startDriveJob = async (type: 'drive' | 'drive-pull' | 'drive-datasets') => {
+    setMessage(''); setPublicationWarning(false);
+    try {
+      await api.createJob(type, {});
+      setMessage(type === 'drive-datasets'
+        ? 'Backup completo de Yellow, Sticky Pi e Unimar iniciado. Acompanhe o progresso no terminal acima.'
+        : type === 'drive' ? 'Backup das anotações Unimar iniciado. Acompanhe o terminal acima.'
+          : 'Importação das anotações Unimar iniciada. Acompanhe o terminal acima.');
+      await onUpdated();
+    } catch (cause) {
+      setPublicationWarning(true);
+      setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar a operação no Drive.');
+    }
+  };
   const changed = plan.filter((item) => item.changed);
   const publish = async () => {
     setPublishing(true); setMessage(''); setPublicationWarning(false);
     try {
       const result = await api.publishDrafts(selected, rebuildAfterPublish);
       const backup = result.driveErrors.length
-        ? `Backup no Drive incompleto (${result.driveBackedUp}/${result.published.length}); confira a conexão e use “Fazer backup agora”.`
+        ? `Backup no Drive incompleto (${result.driveBackedUp}/${result.published.length}); confira a conexão e use “Backup Unimar agora”.`
         : `Backup das anotações e imagens confirmado no Drive (${result.driveBackedUp}/${result.published.length}).`;
       setPublicationWarning(Boolean(result.driveErrors.length));
       setMessage(`${result.published.length} anotação(ões) publicadas, ${result.imagesAdded.length} imagem(ns) adicionadas ao FarmGuard. ${result.job ? 'Reconstrução YOLO iniciada.' : 'Dataset YOLO mantido como está; você pode reconstruí-lo depois em Operações → Gerar YOLO.'} ${backup}`);
@@ -432,10 +531,10 @@ function PublicationPanel({ data, onUpdated, onOpenAnnotation }: { data: Overvie
   };
   return <section className="publish-grid">
     <article className="panel drive-card">
-      <div className="panel-head"><div><span className="eyebrow">Google Drive</span><h2>Backup do dataset fonte</h2></div><StatusPill tone={data.drive.connected ? 'success' : 'danger'}>{data.drive.connected ? 'Conectado' : 'Indisponível'}</StatusPill></div>
+      <div className="panel-head"><div><span className="eyebrow">Google Drive</span><h2>Backup dos datasets</h2></div><StatusPill tone={data.drive.connected ? 'success' : 'danger'}>{data.drive.connected ? 'Conectado' : 'Indisponível'}</StatusPill></div>
       <div className="drive-visual"><Cloud /><div><strong>{data.drive.remote || 'Sem remote'}</strong><span>{data.drive.projectRoot || 'Configure o rclone para habilitar.'}</span></div></div>
-      <p>Rascunhos são enviados para <code>studio-drafts</code>. Na publicação, o Studio copia a imagem e o JSON para o FarmGuard e confirma o backup de ambos no Drive antes de responder.</p>
-      <div className="drive-actions"><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive-pull', {}).then(onUpdated)}><Cloud />Importar novos arquivos</button><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void api.createJob('drive', {}).then(onUpdated)}><UploadCloud />Fazer backup agora</button></div>
+      <p>Na publicação, a imagem e o JSON da Unimar são copiados para <code>Datasets/datasetUnimar/source/traps_events</code>. O backup completo espelha Yellow, Sticky Pi e Unimar; versões remotas substituídas vão para <code>Datasets-history</code>. Rascunhos continuam no backup separado <code>studio-drafts</code>.</p>
+      <div className="drive-actions"><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void startDriveJob('drive-pull')}><Cloud />Importar anotações Unimar</button><button className="secondary-button" disabled={!data.drive.connected} onClick={() => void startDriveJob('drive')}><UploadCloud />Backup Unimar agora</button><button className="secondary-button drive-datasets-button" disabled={!data.drive.connected} onClick={() => void startDriveJob('drive-datasets')}><UploadCloud />Backup completo dos datasets</button></div>
     </article>
     <article className="panel publication-card">
       <div className="panel-head"><div><span className="eyebrow">Publicação controlada</span><h2>Rascunhos → FarmGuard</h2></div><StatusPill tone={changed.length ? 'warning' : 'success'}>{changed.length} alteração(ões)</StatusPill></div>
@@ -730,6 +829,15 @@ function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
 
 function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  useEffect(() => {
+    const stopPagePinch = (event: Event) => event.preventDefault();
+    document.addEventListener('gesturestart', stopPagePinch, { passive: false });
+    document.addEventListener('gesturechange', stopPagePinch, { passive: false });
+    return () => {
+      document.removeEventListener('gesturestart', stopPagePinch);
+      document.removeEventListener('gesturechange', stopPagePinch);
+    };
+  }, []);
   useEffect(() => { api.authStatus().then((status) => setAuthenticated(status.authenticated)).catch(() => setAuthenticated(false)); }, []);
   useEffect(() => {
     const expired = () => setAuthenticated(false);

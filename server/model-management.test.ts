@@ -42,9 +42,23 @@ test('promotion copies a calibrated checkpoint and backs up the previous main mo
     assert.equal(configuration.confidence, 0.25);
     assert.equal(configuration.nms_iou, 0.4);
     assert.equal(configuration.promotion.source_model_id, modelId);
+    assert.equal(await management.isPromotedCopy(candidate), true);
     assert.equal((await fs.stat(path.join(farmPaths.models, 'insect-detector.pt'))).size, (await fs.stat(candidate)).size);
     assert.equal(await fs.readFile(path.join(result.backupRoot, 'insect-detector.pt'), 'utf8'), 'previous-model');
     assert.equal(JSON.parse(await fs.readFile(path.join(result.backupRoot, 'insect-detector.json'), 'utf8')).name, 'previous');
+    const context = await management.prepareCalibration(modelId);
+    await fs.mkdir(path.dirname(context.output), { recursive: true });
+    const header = 'confidence,nms_iou,match_iou,ground_truth,predictions,tp,fp,fn,precision,recall,f1,edit_proxy';
+    const sweepRows = Array.from({ length: 30 }, (_, index) =>
+      `${((index + 1) / 100).toFixed(2)},0.4,0.3,1,1,1,0,0,1,1,1,0`);
+    await fs.writeFile(context.output, `${header}\n${sweepRows.join('\n')}\n`);
+    const precise = await management.finishCalibration(context);
+    assert.equal(precise.testedPairs, 30);
+    assert.equal(precise.rows.length, 20);
+    assert.equal(precise.confidenceGrid?.length, 30);
+    await assert.rejects(fs.access(context.output), { code: 'ENOENT' });
+    await fs.writeFile(candidate, 'changed-model');
+    assert.equal(await management.isPromotedCopy(candidate), false);
   } finally {
     if (previousRoot === undefined) delete process.env.FARMGUARD_ROOT; else process.env.FARMGUARD_ROOT = previousRoot;
     if (previousData === undefined) delete process.env.STUDIO_DATA_ROOT; else process.env.STUDIO_DATA_ROOT = previousData;

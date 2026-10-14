@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config, farmPaths } from './config.js';
 import { backupDraft, driveStatus } from './drive.js';
 import { dimensions, imageFor, sourceImage, sourceImages } from './annotation-source.js';
-import { calibrationForModels, promotedModel } from './model-management.js';
+import { calibrationForModels, isPromotedCopy, promotedModel } from './model-management.js';
 
 export type AnnotationBox = {
   x: number;
@@ -281,12 +281,14 @@ export async function overview() {
   const thresholdRows = await readCsv(
     path.join(farmPaths.runs, 'threshold-sweep.csv'),
   );
-  const models = [...directModels, ...runModels].sort((a, b) =>
-    b.modifiedAt.localeCompare(a.modifiedAt));
-  const [calibrations, promoted] = await Promise.all([
-    models.length ? calibrationForModels(models) : Promise.resolve([]),
-    promotedModel(),
-  ]);
+  const promoted = await promotedModel();
+  const allModels = [...directModels, ...runModels];
+  const source = allModels.find((model) => model.id === promoted?.sourceModelId);
+  const hideCopy = source && await isPromotedCopy(source.path);
+  const models = allModels.filter((model) => !(hideCopy && model.id === 'model:insect-detector.pt'))
+    .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+  const calibrations = models.length ? await calibrationForModels(models) : [];
+  const promotedId = hideCopy ? source.id : 'model:insect-detector.pt';
   return {
     connected: await exists(config.farmGuardRoot),
     farmGuardRoot: config.farmGuardRoot,
@@ -305,7 +307,7 @@ export async function overview() {
     },
     runs: runs.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
     models: models.map((model, index) => ({ ...model, calibration: calibrations[index] || null,
-      isPromoted: model.id === promoted?.sourceModelId })),
+      isPromoted: Boolean(promoted) && model.id === promotedId })),
     promoted,
     predictions: predictions.sort((a, b) =>
       b.modifiedAt.localeCompare(a.modifiedAt),
@@ -358,6 +360,26 @@ export function resolvePredictionImage(group: string, file: string) {
     return null;
   }
   return path.join(farmPaths.predictions, group, file);
+}
+
+export async function predictionDetections(group: string, file: string) {
+  if (!resolvePredictionImage(group, file)) return null;
+  try {
+    const manifest = JSON.parse(await fs.readFile(path.join(farmPaths.predictions, group, 'detections.json'), 'utf8')) as {
+      images?: Record<string, { width: number; height: number; boxes: Array<{
+        x1: number; y1: number; x2: number; y2: number; confidence: number;
+      }> }>;
+    };
+    return manifest.images?.[file] || null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+export function resolvePredictionOriginal(group: string, file: string) {
+  if (!resolvePredictionImage(group, file)) return null;
+  return path.join(farmPaths.predictions, group, '_originals', file);
 }
 
 export async function predictionFiles(group: string) {

@@ -50,35 +50,23 @@ PORT=4310
 
 `ADMIN_PASSWORD` e `SESSION_SECRET` são obrigatórios quando `AUTH_ENABLED=true`. O arquivo `.env` local é ignorado pelo Git.
 
-O Studio detecta automaticamente o `rclone` gerenciado pelo NTE Localization Studio. A fonte de verdade é sincronizada em `Insect AI Datasets/traps_events`; rascunhos ainda não publicados ficam em `studio-drafts`.
+O Studio detecta automaticamente o `rclone` gerenciado pelo NTE Localization Studio. Os três datasets são espelhados em `Insect AI Datasets/Datasets`, preservando a estrutura local para restauração em `FarmGuard/Iazinha/Datasets`. Versões remotas substituídas ou removidas pelo backup completo vão para `Insect AI Datasets/Datasets-history`. Rascunhos ainda não publicados continuam no backup separado `Insect AI Datasets/traps_events/studio-drafts`.
 
 Para listar também as imagens sem JSON de anotação, o Studio lê `data/sources/traps_events.parquet`. Use **Anotador → Atualizar Parquet** para substituir essa cópia pela versão mais recente; a cópia anterior é arquivada em `data/sources/archive`. As imagens pendentes são baixadas sob demanda para `data/image-cache`, sem alterar o FarmGuard. A fila coloca pendentes FARMLAB primeiro, depois outras pendentes e, por fim, revisadas. O botão **Salvar rascunho** não marca uma imagem como revisada; **Concluir + próxima pendente** marca e avança. **Excluir imagem** pede confirmação e salva a exclusão imediatamente no rascunho, preservando as boxes para uma possível restauração; **Restaurar imagem** também salva imediatamente.
 
-**Sugerir com IA** executa o worker de inferência existente do FarmGuard com o modelo promovido `Iazinha/Models/insect-detector.pt` e a calibração de `insect-detector.json`. As boxes sugeridas substituem as atuais (com confirmação quando há boxes ou a foto está revisada), são salvas como rascunho e podem ser desfeitas; depois de desfazer, salve o rascunho novamente. Uma imagem revisada volta a exigir revisão; nenhuma sugestão publica arquivos no FarmGuard nem reconstrói o YOLO automaticamente. Revise as boxes antes de usar **Concluir + próxima pendente**.
+**Sugerir com IA** usa a IA API no Compose, com o modelo promovido `Iazinha/Models/insect-detector.pt` e a calibração de `insect-detector.json`; na execução nativa sem API configurada, usa o worker local. As boxes sugeridas substituem as atuais (com confirmação quando há boxes ou a foto está revisada), são salvas como rascunho e podem ser desfeitas; depois de desfazer, salve o rascunho novamente. Uma imagem revisada volta a exigir revisão; nenhuma sugestão publica arquivos no FarmGuard nem reconstrói o YOLO automaticamente. Revise as boxes antes de usar **Concluir + próxima pendente**.
 
 **Predizer** usa o modelo escolhido no conjunto atual `DatasetYolo/images/val`, gerando imagens com boxes em `Iazinha/Training/predictions`. Portanto ele não usa automaticamente todas as fotos revisadas: a divisão de validação depende da última geração do DatasetYolo. O nome do lote é opcional; quando vazio, o Studio cria um identificador com data/hora para evitar sobrescrever uma galeria anterior.
 
-"Importar novos arquivos" usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. "Fazer backup agora" envia o estado local de forma não destrutiva. Ao publicar um rascunho, o Studio garante que a imagem também exista em `FarmGuard/.../traps_events/images`, copia o JSON canônico e confirma o backup dos dois arquivos no Drive. Se o Drive falhar, a publicação local permanece e a interface mostra o backup incompleto. Por padrão, **Publicar e fazer backup** não reconstrói o DatasetYolo. Marque **Reconstruir DatasetYolo logo após publicar** para iniciá-lo na mesma ação, ou use **Operações → Gerar YOLO** mais tarde, sem repetir a anotação nem o backup. A reconstrução usa os arquivos publicados localmente no FarmGuard; para recuperá-los apenas do Drive, use **Importar novos arquivos** antes de gerar o YOLO. Confira a conclusão da tarefa no histórico de operações.
+"Importar anotações Unimar" usa `--ignore-existing`: baixa imagens e anotações que ainda não existem localmente sem substituir trabalho local. "Backup Unimar agora" envia a fonte Unimar; "Backup completo dos datasets" espelha também Yellow, Sticky Pi e os arquivos YOLO. Ao publicar um rascunho, o Studio garante que a imagem também exista em `FarmGuard/.../traps_events/images`, copia o JSON canônico e confirma o backup dos dois arquivos na nova árvore do Drive. Se o Drive falhar, a publicação local permanece e a interface mostra o backup incompleto. Por padrão, **Publicar e fazer backup** não reconstrói o DatasetYolo. Marque **Reconstruir DatasetYolo logo após publicar** para iniciá-lo na mesma ação, ou use **Operações → Gerar YOLO** mais tarde. Confira a conclusão da tarefa no histórico de operações.
 
 O plano de publicação identifica **adição**, **atualização**, **exclusão** e **restauração**. Clique no item para abrir sua imagem no anotador, inclusive se estiver excluída. Publicar uma exclusão grava `excluded: true` no JSON; não apaga a foto ou o JSON. A imagem deixa de entrar no DatasetYolo quando ele for reconstruído, e pode ser restaurada depois.
 
-## Cloudflare Tunnel
+## Publicação com Docker e Cloudflare
 
-Com o Studio em execução, o tunnel deve encaminhar o domínio escolhido para `http://localhost:4310`. Para um teste rápido:
+A instalação atual usa o Compose em `../FarmGuard/DOCKER.md`, com apenas Studio, IA API e tunnel. O lançador `FarmGuard Studio.cmd` na Área de Trabalho controla essa pilha. O tunnel encaminha `farmguardstudio.dominiofoda.com.br` para `http://studio:4310` e `ia.dominiofoda.com.br` para `http://ia-api:4320`. `farmguard.dominiofoda.com.br` fica reservado para o futuro site oficial, fora deste Compose. A credencial do tunnel fica em `data/secrets/cloudflare.token`, ignorada pelo Git. Não execute os scripts nativos de inicialização em paralelo com o Compose, pois compartilham dados e tunnel.
 
-```powershell
-cloudflared tunnel --url http://localhost:4310
-```
-
-Para um tunnel nomeado, salve a credencial recebida da Cloudflare em `data/secrets/cloudflare.token` e execute:
-
-```powershell
-.\scripts\start-cloudflare.ps1
-```
-
-Na instalação local, a credencial fica em `data/secrets/cloudflare.token`, ignorado pelo Git. Para iniciar o servidor e o tunnel em segundo plano, execute `scripts/start-background.ps1` após `npm run build`. No Windows, `scripts/manage-studio.ps1` aceita `-Action Start`, `Restart`, `Stop` ou `Status`; o lançador **FarmGuard Studio.cmd** na Área de Trabalho oferece essas opções em um menu. Ele é manual: não configura inicialização automática junto com o PC.
-
-No iPhone, abra `https://farmguard.dominiofoda.com.br` no Safari, toque em Compartilhar e em **Adicionar à Tela de Início**. O Studio abre em modo de aplicativo. A tela offline informa quando o computador principal ou a internet estiver indisponível; dados e comandos nunca são armazenados no cache do navegador.
+No iPhone, abra `https://farmguardstudio.dominiofoda.com.br` no Safari, toque em Compartilhar e em **Adicionar à Tela de Início**. O Studio abre em modo de aplicativo. A tela offline informa quando o computador principal ou a internet estiver indisponível; dados e comandos nunca são armazenados no cache do navegador.
 
 O login do Studio continua obrigatório atrás do tunnel. Para uma segunda camada, configure também uma política do Cloudflare Access para o hostname.
 
@@ -89,7 +77,7 @@ O login do Studio continua obrigatório atrás do tunnel. Para uma segunda camad
 - catálogo Parquet e cache de imagens pendentes: `FarmGuard-Studio/data/sources` e `data/image-cache`;
 - histórico de tarefas: `FarmGuard-Studio/data/jobs`;
 - backups antes de publicação: `FarmGuard-Studio/data/publication-backups`;
-- publicação autorizada: `FarmGuard/Iazinha/DatasetCreator/.../annotations` e `DatasetYolo`;
+- publicação autorizada: `FarmGuard/Iazinha/Datasets/datasetUnimar/source/traps_events/annotations` e `datasetUnimar/DatasetYolo`;
 - resultados autorizados: `FarmGuard/Iazinha/Training/runs` e `predictions`.
 
 O código-fonte do FarmGuard não é alterado. Somente artefatos de dataset e execução são escritos pelas ações explícitas do Studio.

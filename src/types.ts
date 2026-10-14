@@ -37,8 +37,10 @@ export type ThresholdRow = {
 export type ModelCalibration = {
   modelId: string;
   calibratedAt: string;
+  mode?: 'automatic' | 'manual';
   best: ThresholdRow;
   rows: ThresholdRow[];
+  testedPairs?: number;
   stale: boolean;
 };
 
@@ -47,6 +49,12 @@ export type Prediction = {
   count: number;
   modifiedAt: string;
   preview: string | null;
+};
+
+export type PredictionDetections = {
+  width: number;
+  height: number;
+  boxes: Array<{ x1: number; y1: number; x2: number; y2: number; confidence: number }>;
 };
 
 export type Overview = {
@@ -117,7 +125,7 @@ export type Annotation = {
 
 export type Job = {
   id: string;
-  type: 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
+  type: 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull' | 'drive-datasets';
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   createdAt: string;
   startedAt?: string;
@@ -126,6 +134,7 @@ export type Job = {
   logCount?: number;
   command: string[];
   exitCode?: number | null;
+  calibration?: { modelId: string };
 };
 
 export type AuthStatus = {

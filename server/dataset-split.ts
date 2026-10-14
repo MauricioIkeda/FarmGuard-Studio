@@ -37,23 +37,34 @@ async function serialized<T>(task: () => Promise<T>): Promise<T> {
   try { return await task(); } finally { release(); }
 }
 
-async function readOverrides(): Promise<Record<string, DatasetSplit>> {
-  if (!(await exists(OVERRIDES_PATH))) return {};
-  const parsed = JSON.parse(await fs.readFile(OVERRIDES_PATH, 'utf8')) as { version?: number; traps?: Record<string, unknown> };
-  if (parsed.version !== 1 || !parsed.traps || typeof parsed.traps !== 'object') throw new Error('Plano de divisão salvo é inválido.');
-  const result: Record<string, DatasetSplit> = {};
+type SplitOverrides = { traps: Record<string, DatasetSplit>; images: Record<string, DatasetSplit> };
+
+async function readOverrides(): Promise<SplitOverrides> {
+  if (!(await exists(OVERRIDES_PATH))) return { traps: {}, images: {} };
+  const parsed = JSON.parse(await fs.readFile(OVERRIDES_PATH, 'utf8')) as {
+    version?: number; traps?: Record<string, unknown>; images?: Record<string, unknown>;
+  };
+  if (![1, 2].includes(parsed.version || 0) || !parsed.traps || typeof parsed.traps !== 'object') {
+    throw new Error('Plano de divisão salvo é inválido.');
+  }
+  const result: SplitOverrides = { traps: {}, images: {} };
   for (const [trap, split] of Object.entries(parsed.traps)) {
     assertSplit(split);
-    result[trap] = split;
+    result.traps[trap] = split;
+  }
+  for (const [image, split] of Object.entries(parsed.images || {})) {
+    if (!IMAGE_NAME.test(image) || path.basename(image) !== image) throw new Error('Imagem inválida no plano de divisão.');
+    assertSplit(split);
+    result.images[image] = split;
   }
   return result;
 }
 
-async function writeOverrides(overrides: Record<string, DatasetSplit>) {
+async function writeOverrides(overrides: SplitOverrides) {
   await fs.mkdir(config.dataRoot, { recursive: true });
   const temporary = `${OVERRIDES_PATH}.${crypto.randomUUID()}.tmp`;
   try {
-    await fs.writeFile(temporary, `${JSON.stringify({ version: 1, traps: overrides }, null, 2)}\n`, 'utf8');
+    await fs.writeFile(temporary, `${JSON.stringify({ version: 2, ...overrides }, null, 2)}\n`, 'utf8');
     await fs.rename(temporary, OVERRIDES_PATH);
   } finally { await fs.rm(temporary, { force: true }); }
 }
@@ -76,19 +87,13 @@ export async function listDatasetImages(): Promise<DatasetImage[]> {
       const trap = annotation.source?.metadata?.trap_code;
       if (!trap) throw new Error(`Armadilha ausente na anotação ${entry.name}.`);
       const boxes = (await fs.readFile(labelPath, 'utf8')).split(/\r?\n/).filter(Boolean).length;
-      images.push({ image: entry.name, split, desiredSplit: overrides[trap] || split, trap,
+      images.push({ image: entry.name, split, desiredSplit: overrides.images[entry.name] || overrides.traps[trap] || split, trap,
         boxes, ignoreRegions: annotation.ignore_regions?.length || 0 });
     }
   }
   images.sort((a, b) => a.split.localeCompare(b.split) || a.trap.localeCompare(b.trap) || a.image.localeCompare(b.image));
   const imageNames = new Set(images.map((item) => item.image));
   if (imageNames.size !== images.length) throw new Error('A mesma imagem está nos dois conjuntos do DatasetYolo.');
-  const traps = new Map<string, DatasetSplit>();
-  for (const image of images) {
-    const existing = traps.get(image.trap);
-    if (existing && existing !== image.split) throw new Error(`Armadilha ${image.trap} está em treino e validação.`);
-    traps.set(image.trap, image.split);
-  }
   return images;
 }
 
@@ -126,28 +131,26 @@ export async function datasetThumbnailPath(split: string, image: string): Promis
   } finally { await fs.rm(temporary, { force: true }); }
 }
 
-async function moveTrapUnlocked(trap: string, destination: DatasetSplit, persist: boolean) {
+async function moveImageUnlocked(image: string, destination: DatasetSplit, persist: boolean) {
   const images = await listDatasetImages();
-  const group = images.filter((item) => item.trap === trap);
-  if (!group.length) throw new Error(`Armadilha ${trap} não está no DatasetYolo atual.`);
-  const source = group[0].split;
+  const item = images.find((entry) => entry.image === image);
+  if (!item) throw new Error(`Imagem ${image} não está no DatasetYolo atual.`);
+  const source = item.split;
   if (source === destination) return images;
-  const remaining = images.filter((item) => item.split === source).length - group.length;
+  const remaining = images.filter((entry) => entry.split === source).length - 1;
   if (remaining <= 0) throw new Error(`A mudança deixaria ${source === 'train' ? 'treino' : 'validação'} sem imagens.`);
   const moves: Array<{ from: string; to: string }> = [];
-  for (const item of group) {
-    for (const [directory, name] of [[imageDir, item.image], [labelDir, `${path.parse(item.image).name}.txt`]] as const) {
-      const from = path.join(directory(source), name);
-      const to = path.join(directory(destination), name);
-      if (!(await exists(from)) || await exists(to)) throw new Error(`Conflito ao mover ${name}; nenhum arquivo foi alterado.`);
-      moves.push({ from, to });
-    }
+  for (const [directory, name] of [[imageDir, item.image], [labelDir, `${path.parse(item.image).name}.txt`]] as const) {
+    const from = path.join(directory(source), name);
+    const to = path.join(directory(destination), name);
+    if (!(await exists(from)) || await exists(to)) throw new Error(`Conflito ao mover ${name}; nenhum arquivo foi alterado.`);
+    moves.push({ from, to });
   }
   const overrides = persist ? await readOverrides() : null;
   const completed: typeof moves = [];
   try {
     for (const move of moves) { await fs.rename(move.from, move.to); completed.push(move); }
-    if (overrides) { overrides[trap] = destination; await writeOverrides(overrides); }
+    if (overrides) { overrides.images[image] = destination; await writeOverrides(overrides); }
   } catch (error) {
     for (const move of completed.reverse()) await fs.rename(move.to, move.from);
     throw error;
@@ -155,20 +158,19 @@ async function moveTrapUnlocked(trap: string, destination: DatasetSplit, persist
   return listDatasetImages();
 }
 
-export async function moveTrap(trap: string, split: unknown) {
+export async function moveImage(image: string, split: unknown) {
   if (!config.allowFarmGuardJobs) throw new Error('Alterações no DatasetYolo estão desativadas.');
   assertSplit(split);
-  if (typeof trap !== 'string' || !trap || trap.length > 100) throw new Error('Armadilha inválida.');
-  return serialized(() => moveTrapUnlocked(trap, split, true));
+  if (typeof image !== 'string' || !IMAGE_NAME.test(image) || path.basename(image) !== image) throw new Error('Imagem inválida.');
+  return serialized(() => moveImageUnlocked(image, split, true));
 }
 
 export async function reapplySplitOverrides() {
   if (!config.allowFarmGuardJobs) throw new Error('Alterações no DatasetYolo estão desativadas.');
   return serialized(async () => {
-    const overrides = await readOverrides();
-    for (const [trap, split] of Object.entries(overrides)) {
-      const images = await listDatasetImages();
-      if (images.some((image) => image.trap === trap)) await moveTrapUnlocked(trap, split, false);
+    const images = await listDatasetImages();
+    for (const image of images.filter((item) => item.desiredSplit !== item.split)) {
+      await moveImageUnlocked(image.image, image.desiredSplit, false);
     }
     return listDatasetImages();
   });

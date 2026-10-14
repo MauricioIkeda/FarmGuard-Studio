@@ -4,12 +4,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { config, farmPaths } from './config.js';
-import { discoverDrive, remoteProjectRoot } from './drive.js';
+import { discoverDrive, remoteDatasetHistoryRoot, remoteDatasetsRoot, remoteUnimarSourceRoot } from './drive.js';
 import { studioRoot } from './config.js';
 import { reapplySplitOverrides } from './dataset-split.js';
 import { finishCalibration, modelIdForPath, prepareCalibration, readCalibration, resolveModel, type CalibrationContext } from './model-management.js';
 
-export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull';
+export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull' | 'drive-datasets';
 export type Job = {
   id: string;
   type: JobType;
@@ -66,12 +66,29 @@ function safeName(value: unknown, fallback: string) {
   return normalized || fallback;
 }
 
+async function selectedDataset(options: Record<string, unknown>, ignoreRegions: boolean) {
+  const key = String(options.dataset || 'unimar');
+  const names: Record<string, string> = {
+    unimar: 'datasetUnimar', yellow: 'datasetYellow', stickyPi: 'datasetStickyPi',
+  };
+  const folder = names[key];
+  if (!folder) throw new Error('Dataset inválido. Escolha um dos conjuntos catalogados.');
+  if (ignoreRegions && key !== 'unimar') {
+    throw new Error('Áreas incertas são suportadas somente no dataset Unimar.');
+  }
+  const yaml = path.join(farmPaths.ia, 'Datasets', folder, 'DatasetYolo', 'dataset.yaml');
+  try { await fs.access(yaml); }
+  catch { throw new Error(`Dataset ${folder} ainda não foi preparado neste computador.`); }
+  return yaml;
+}
+
 async function buildCommand(type: JobType, options: Record<string, unknown>, calibration?: CalibrationContext) {
   const python = pythonExecutable();
   if (type === 'train') {
     const ignoreRegions = options.ignoreRegions === true;
     const args = [path.join(farmPaths.training, ignoreRegions ? 'train_ignore.py' : 'train.py')];
     if (options.model) args.push('--model', String(options.model));
+    args.push('--data', await selectedDataset(options, ignoreRegions));
     args.push('--name', safeName(options.name, `${ignoreRegions ? 'studio-ignore' : 'studio'}-${Date.now()}`));
     return [python, ...args];
   }
@@ -79,13 +96,27 @@ async function buildCommand(type: JobType, options: Record<string, unknown>, cal
     const ignoreRegions = options.ignoreRegions === true;
     const args = [path.join(farmPaths.training, ignoreRegions ? 'val_ignore.py' : 'val.py')];
     if (options.model || ignoreRegions) args.push('--model', String(options.model || path.join(farmPaths.models, 'insect-detector.pt')));
+    args.push('--data', await selectedDataset(options, ignoreRegions));
     if (ignoreRegions && options.name) args.push('--name', safeName(options.name, `studio-ignore-validation-${Date.now()}`));
     return [python, ...args];
   }
   if (type === 'tune') {
-    const args = [path.join(farmPaths.training, 'tune_thresholds.py')];
     if (!calibration) throw new Error('Modelo de calibração ausente.');
-    args.push('--model', calibration.modelPath, '--output', calibration.output);
+    const manual = options.manualConfidence !== undefined || options.manualIou !== undefined;
+    if (manual) {
+      const confidence = options.manualConfidence;
+      const iou = options.manualIou;
+      if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0.01 || confidence > 0.99 ||
+          typeof iou !== 'number' || !Number.isFinite(iou) || iou < 0.01 || iou > 0.99) {
+        throw new Error('Confiança e NMS IoU manuais devem estar entre 0,01 e 0,99.');
+      }
+      calibration.mode = 'manual';
+      return [python, path.join(studioRoot, 'server', 'python', 'manual_calibration.py'),
+        '--model', calibration.modelPath, '--dataset', farmPaths.yolo, '--output', calibration.output,
+        '--confidence', String(confidence), '--iou', String(iou)];
+    }
+    const args = [path.join(studioRoot, 'server', 'python', 'precise_calibration.py')];
+    args.push('--model', calibration.modelPath, '--dataset', farmPaths.yolo, '--output', calibration.output);
     return [python, ...args];
   }
   if (type === 'predict') {
@@ -111,11 +142,17 @@ async function buildCommand(type: JobType, options: Record<string, unknown>, cal
   }
   const drive = await discoverDrive();
   if (!drive) throw new Error('Google Drive nao configurado.');
+  if (type === 'drive-datasets') {
+    const history = remoteDatasetHistoryRoot(drive, new Date().toISOString().replace(/[:.]/g, '-'));
+    return [drive.executable, 'sync', farmPaths.datasets, remoteDatasetsRoot(drive),
+      '--config', drive.configFile, '--checksum', '--create-empty-src-dirs', '--backup-dir', history,
+      '--stats-one-line', '--stats', '5s', '--stats-log-level', 'NOTICE'];
+  }
   if (type === 'drive-pull') {
     return [
       drive.executable,
       'copy',
-      remoteProjectRoot(drive),
+      remoteUnimarSourceRoot(drive),
       farmPaths.annotationRoot,
       '--config',
       drive.configFile,
@@ -124,13 +161,15 @@ async function buildCommand(type: JobType, options: Record<string, unknown>, cal
       '--stats-one-line',
       '--stats',
       '5s',
+      '--stats-log-level',
+      'NOTICE',
     ];
   }
   return [
     drive.executable,
     'copy',
     farmPaths.annotationRoot,
-    remoteProjectRoot(drive),
+    remoteUnimarSourceRoot(drive),
     '--config',
     drive.configFile,
     '--checksum',
@@ -138,6 +177,8 @@ async function buildCommand(type: JobType, options: Record<string, unknown>, cal
     '--stats-one-line',
     '--stats',
     '5s',
+    '--stats-log-level',
+    'NOTICE',
   ];
 }
 
@@ -219,7 +260,7 @@ function run(job: Job) {
       .toString()
       .split(/\r?\n/)
       .filter(Boolean)
-      .map((line) => (channel === 'stderr' ? `[erro] ${line}` : line));
+      .map((line) => (channel === 'stderr' && !/^\s*\d{4}\/\d{2}\/\d{2}.*NOTICE\s*:/.test(line) ? `[erro] ${line}` : line));
     job.logs.push(...lines);
     job.logCount += lines.length;
     if (job.logs.length > 1500) job.logs.splice(0, job.logs.length - 1500);
@@ -240,7 +281,7 @@ function run(job: Job) {
       if (job.status !== 'cancelled' && job.status !== 'failed' && code === 0 && job.type === 'dataset') {
         try {
           await reapplySplitOverrides();
-          job.logs.push('Divisão por armadilha do Studio reaplicada após a reconstrução YOLO.');
+          job.logs.push('Divisão por imagem do Studio reaplicada após a reconstrução YOLO.');
           job.logCount += 1;
         } catch (error) {
           job.logs.push(`Falha ao reaplicar a divisão salva: ${error instanceof Error ? error.message : String(error)}`);

@@ -3,7 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, farmPaths, studioRoot } from './config.js';
-import { readCalibration, resolveModel } from './model-management.js';
+import { promotedModel, readCalibration, resolveModel } from './model-management.js';
+import { getPromotedModel, iaApiConfigured, predictPromotedImage } from './ia-api.js';
 
 const root = path.join(config.dataRoot, 'camera-tests');
 const maxAgeMs = 24 * 60 * 60 * 1000;
@@ -35,11 +36,11 @@ export async function cleanupCameraTests() {
   }
 }
 
-function runInference(args: string[]) {
+function runInference(args: string[], scriptName = 'test_image.py') {
   const python = process.platform === 'win32'
     ? path.join(farmPaths.ia, '.venv', 'Scripts', 'python.exe')
     : path.join(farmPaths.ia, '.venv', 'bin', 'python');
-  const script = path.join(studioRoot, 'server', 'python', 'test_image.py');
+  const script = path.join(studioRoot, 'server', 'python', scriptName);
   return new Promise<{ width: number; height: number; detections: number }>((resolve, reject) => {
     const child = spawn(python, [script, ...args], { cwd: farmPaths.training, shell: false, windowsHide: true });
     let stdout = '';
@@ -79,18 +80,31 @@ export async function createCameraTest(modelId: string, body: Buffer, contentTyp
   const testDir = directory(id);
   try {
     const model = await resolveModel(modelId);
+    const principal = iaApiConfigured() && modelId === (await promotedModel())?.sourceModelId;
     const calibration = await readCalibration(modelId);
     const best = calibration && !calibration.stale ? calibration.best : null;
-    const confidence = best?.confidence ?? 0.2;
-    const iou = best?.nms_iou ?? 0.4;
+    const apiModel = principal ? await getPromotedModel() : null;
+    const confidence = apiModel?.confidence ?? best?.confidence ?? 0.2;
+    const iou = apiModel?.nms_iou ?? best?.nms_iou ?? 0.4;
     await fs.mkdir(testDir, { recursive: true });
     const original = path.join(testDir, `original${ext}`);
     const annotated = path.join(testDir, 'annotated.jpg');
     await fs.writeFile(original, body);
-    const result = await runInference(['--model', model.path, '--image', original, '--output', annotated,
-      '--confidence', String(confidence), '--iou', String(iou)]);
+    let result: { width: number; height: number; detections: number };
+    if (principal) {
+      const prediction = await predictPromotedImage(original);
+      if (prediction.model.sha256.toLowerCase() !== apiModel?.sha256.toLowerCase()) throw new Error('O modelo da IA API mudou durante o teste; tente novamente.');
+      const predictionFile = path.join(testDir, 'prediction.json');
+      await fs.writeFile(predictionFile, JSON.stringify(prediction), 'utf8');
+      result = await runInference([ '--image', original, '--prediction', predictionFile, '--output', annotated ],
+        'render_api_prediction.py');
+      await fs.unlink(predictionFile);
+    } else {
+      result = await runInference(['--model', model.path, '--image', original, '--output', annotated,
+        '--confidence', String(confidence), '--iou', String(iou)]);
+    }
     const metadata = { id, modelId, modelName: modelId.replace(/^(run|model):/, ''),
-      confidence, nmsIou: iou, calibrated: Boolean(best), ...result,
+      confidence, nmsIou: iou, calibrated: Boolean(apiModel || best), ...result,
       originalUrl: `/api/camera-test/${id}/original`, annotatedUrl: `/api/camera-test/${id}/annotated` };
     await fs.writeFile(path.join(testDir, 'result.json'), `${JSON.stringify(metadata)}\n`, 'utf8');
     return metadata;

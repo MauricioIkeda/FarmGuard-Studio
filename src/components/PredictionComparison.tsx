@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, Minus, Plus, RefreshCw, X } from 'lucide-react';
 import { api } from '../api';
-import type { Prediction } from '../types';
+import type { Prediction, PredictionDetections } from '../types';
 
 type View = { zoom: number; x: number; y: number };
 const imageUrl = (group: string, file: string) => `/api/predictions/${encodeURIComponent(group)}/${encodeURIComponent(file)}`;
@@ -17,6 +17,8 @@ export function PredictionComparison({ predictions }: { predictions: Prediction[
   const [leftFiles, setLeftFiles] = useState<string[]>([]);
   const [rightFiles, setRightFiles] = useState<string[]>([]);
   const [file, setFile] = useState('');
+  const [detectionLayers, setDetectionLayers] = useState<Array<PredictionDetections | null> | null>(null);
+  const [cleanBoxes, setCleanBoxes] = useState(false);
   const [view, setView] = useState<View>({ zoom: 1, x: 0, y: 0 });
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState('');
@@ -47,6 +49,15 @@ export function PredictionComparison({ predictions }: { predictions: Prediction[
   }, [common, file]);
   useEffect(() => { setView({ zoom: 1, x: 0, y: 0 }); }, [file]);
   useEffect(() => {
+    let current = true;
+    setDetectionLayers(null);
+    setCleanBoxes(false);
+    if (!file || !left || !right || left === right) return;
+    void Promise.all([left, right].map((group) => api.predictionDetections(group, file).catch(() => null)))
+      .then((layers) => { if (current) { setDetectionLayers(layers); setCleanBoxes(layers.every(Boolean)); } });
+    return () => { current = false; };
+  }, [left, right, file]);
+  useEffect(() => {
     if (!expanded) return;
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setExpanded(false);
@@ -65,7 +76,14 @@ export function PredictionComparison({ predictions }: { predictions: Prediction[
       zoomAt(Math.exp(-event.deltaY * .001), event.clientX - rect.left, event.clientY - rect.top);
     };
     element.addEventListener('wheel', wheel, { passive: false });
-    return () => element.removeEventListener('wheel', wheel);
+    const stopPageGesture = (event: Event) => event.preventDefault();
+    element.addEventListener('gesturestart', stopPageGesture, { passive: false });
+    element.addEventListener('gesturechange', stopPageGesture, { passive: false });
+    return () => {
+      element.removeEventListener('wheel', wheel);
+      element.removeEventListener('gesturestart', stopPageGesture);
+      element.removeEventListener('gesturechange', stopPageGesture);
+    };
   }, [expanded, file]);
 
   function changeFile(step: number) {
@@ -80,7 +98,7 @@ export function PredictionComparison({ predictions }: { predictions: Prediction[
     const cx = x === undefined ? panelWidth / 2 : x % panelWidth;
     const cy = y === undefined ? panelHeight / 2 : y % panelHeight;
     setView((current) => {
-      const zoom = Math.max(1, Math.min(6, current.zoom * factor));
+      const zoom = Math.max(1, Math.min(64, current.zoom * factor));
       const ratio = zoom / current.zoom;
       return { zoom, x: current.x + (1 - ratio) * (cx - panelWidth / 2 - current.x),
         y: current.y + (1 - ratio) * (cy - panelHeight / 2 - current.y) };
@@ -101,7 +119,11 @@ export function PredictionComparison({ predictions }: { predictions: Prediction[
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       const next = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinchDistance.current) zoomAt(next / pinchDistance.current);
+      if (pinchDistance.current) {
+        const rect = stage.current?.getBoundingClientRect();
+        zoomAt(next / pinchDistance.current,
+          (a.x + b.x) / 2 - (rect?.left || 0), (a.y + b.y) / 2 - (rect?.top || 0));
+      }
       pinchDistance.current = next;
     } else setView((current) => ({ ...current, x: current.x + event.clientX - previous.x, y: current.y + event.clientY - previous.y }));
   };
@@ -119,11 +141,15 @@ export function PredictionComparison({ predictions }: { predictions: Prediction[
     {loading && <p className="prediction-compare-hint">Carregando galerias…</p>}
     {!loading && left !== right && !common.length && !error && <p className="prediction-compare-hint">Essas galerias não têm fotos com o mesmo nome.</p>}
     {file && <><div className="prediction-compare-strip">{common.map((item) => <button key={item} className={item === file ? 'active' : ''} onClick={() => setFile(item)} title={item}><img src={thumbUrl(left, item)} alt="" loading="lazy" />{item === uncertainImage && <span>Áreas incertas</span>}</button>)}</div>
-      <div className="prediction-compare-toolbar"><div><button className="icon-button" onClick={() => changeFile(-1)} aria-label="Foto anterior"><ChevronLeft /></button><button className="icon-button" onClick={() => changeFile(1)} aria-label="Próxima foto"><ChevronRight /></button><span title={file}>{file}</span></div><div><button className="icon-button" onClick={() => zoomAt(1 / 1.4)} aria-label="Diminuir zoom"><Minus /></button><span>{Math.round(view.zoom * 100)}%</span><button className="icon-button" onClick={() => zoomAt(1.4)} aria-label="Aumentar zoom"><Plus /></button><button className="icon-button" onClick={() => setView({ zoom: 1, x: 0, y: 0 })} aria-label="Reajustar imagens"><RefreshCw /></button><button className="icon-button" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Fechar tela cheia' : 'Abrir tela cheia'}>{expanded ? <X /> : <Maximize2 />}</button></div></div>
+      <div className="prediction-compare-toolbar"><div><button className="icon-button" onClick={() => changeFile(-1)} aria-label="Foto anterior"><ChevronLeft /></button><button className="icon-button" onClick={() => changeFile(1)} aria-label="Próxima foto"><ChevronRight /></button><span title={file}>{file}</span></div><div>{detectionLayers?.every(Boolean) && <button className="prediction-clean-button" onClick={() => setCleanBoxes((value) => !value)}>{cleanBoxes ? 'Boxes limpas' : 'IA original'}</button>}<button className="icon-button" onClick={() => zoomAt(1 / 1.4)} aria-label="Diminuir zoom"><Minus /></button><span>{Math.round(view.zoom * 100)}%</span><button className="icon-button" onClick={() => zoomAt(1.4)} aria-label="Aumentar zoom"><Plus /></button><button className="icon-button" onClick={() => setView({ zoom: 1, x: 0, y: 0 })} aria-label="Reajustar imagens"><RefreshCw /></button><button className="icon-button" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Fechar tela cheia' : 'Abrir tela cheia'}>{expanded ? <X /> : <Maximize2 />}</button></div></div>
       <div className={expanded ? 'prediction-compare-fullscreen' : ''}>
-        {expanded && <div className="prediction-compare-fullscreen-head"><strong>{file}</strong><div><button className="icon-button" onClick={() => changeFile(-1)} aria-label="Foto anterior"><ChevronLeft /></button><button className="icon-button" onClick={() => changeFile(1)} aria-label="Próxima foto"><ChevronRight /></button><button className="icon-button" onClick={() => zoomAt(1 / 1.4)} aria-label="Diminuir zoom"><Minus /></button><span>{Math.round(view.zoom * 100)}%</span><button className="icon-button" onClick={() => zoomAt(1.4)} aria-label="Aumentar zoom"><Plus /></button><button className="icon-button" onClick={() => setView({ zoom: 1, x: 0, y: 0 })} aria-label="Reajustar imagens"><RefreshCw /></button><button className="icon-button" onClick={() => setExpanded(false)} aria-label="Fechar tela cheia"><X /></button></div></div>}
+        {expanded && <div className="prediction-compare-fullscreen-head"><strong>{file}</strong><div>{detectionLayers?.every(Boolean) && <button className="prediction-clean-button" onClick={() => setCleanBoxes((value) => !value)}>{cleanBoxes ? 'Boxes limpas' : 'IA original'}</button>}<button className="icon-button" onClick={() => changeFile(-1)} aria-label="Foto anterior"><ChevronLeft /></button><button className="icon-button" onClick={() => changeFile(1)} aria-label="Próxima foto"><ChevronRight /></button><button className="icon-button" onClick={() => zoomAt(1 / 1.4)} aria-label="Diminuir zoom"><Minus /></button><span>{Math.round(view.zoom * 100)}%</span><button className="icon-button" onClick={() => zoomAt(1.4)} aria-label="Aumentar zoom"><Plus /></button><button className="icon-button" onClick={() => setView({ zoom: 1, x: 0, y: 0 })} aria-label="Reajustar imagens"><RefreshCw /></button><button className="icon-button" onClick={() => setExpanded(false)} aria-label="Fechar tela cheia"><X /></button></div></div>}
         <div ref={stage} className="prediction-compare-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
-          {[left, right].map((group, index) => <div className="prediction-compare-side" key={group}><div className="prediction-compare-label">{index === 0 ? 'A' : 'B'} · {group}</div><div className="prediction-compare-image"><img src={imageUrl(group, file)} alt={`Predição de ${group}`} draggable={false} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }} /></div></div>)}
+          {!detectionLayers && <div className="prediction-compare-loading">Preparando visualização…</div>}
+          {detectionLayers && [left, right].map((group, index) => {
+            const layer = cleanBoxes ? detectionLayers[index] : null;
+            return <div className="prediction-compare-side" key={group}><div className="prediction-compare-label">{index === 0 ? 'A' : 'B'} · {group}</div><div className="prediction-compare-image"><div className="prediction-compare-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}><img src={layer ? `${imageUrl(group, file)}/original` : imageUrl(group, file)} alt={`Predição de ${group}`} draggable={false} />{layer && <svg className="prediction-box-layer" viewBox={`0 0 ${layer.width} ${layer.height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">{layer.boxes.map((box, boxIndex) => <rect key={boxIndex} x={box.x1} y={box.y1} width={box.x2 - box.x1} height={box.y2 - box.y1} fill="none" stroke="#78f0cc" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />)}</svg>}</div></div></div>;
+          })}
         </div>
       </div>
       <p className="prediction-compare-hint">Zoom e arrasto sincronizados. Na foto com áreas incertas, a amálgama não deve ser julgada como insetos individuais identificáveis.</p>

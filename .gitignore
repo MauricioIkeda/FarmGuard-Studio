@@ -4,3 +4,5 @@ dist-server/
 data/
 .env
 *.log
+__pycache__/
+*.pyc

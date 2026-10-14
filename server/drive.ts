@@ -72,6 +72,18 @@ export function remoteProjectRoot(installation: DriveInstallation) {
   return `${installation.remote}:${installation.remoteRoot}/${cleanSegment(path.basename(farmPaths.annotationRoot))}`;
 }
 
+export function remoteDatasetsRoot(installation: DriveInstallation) {
+  return `${installation.remote}:${installation.remoteRoot}/Datasets`;
+}
+
+export function remoteUnimarSourceRoot(installation: DriveInstallation) {
+  return `${remoteDatasetsRoot(installation)}/datasetUnimar/source/traps_events`;
+}
+
+export function remoteDatasetHistoryRoot(installation: DriveInstallation, timestamp: string) {
+  return `${installation.remote}:${installation.remoteRoot}/Datasets-history/${timestamp}`;
+}
+
 async function rclone(arguments_: string[], timeout = 120_000) {
   const installation = await discoverDrive();
   if (!installation) throw new Error('Configuracao do Google Drive nao encontrada.');
@@ -107,14 +119,14 @@ export async function driveStatus() {
       configured: true,
       connected,
       remote: installation.remote,
-      projectRoot: remoteProjectRoot(installation),
+      projectRoot: remoteDatasetsRoot(installation),
     };
   } catch (error) {
     return {
       configured: true,
       connected: false,
       remote: installation.remote,
-      projectRoot: remoteProjectRoot(installation),
+      projectRoot: remoteDatasetsRoot(installation),
       error: error instanceof Error ? error.message : 'Falha ao consultar o Drive.',
     };
   }
@@ -137,7 +149,7 @@ export async function backupPublishedAnnotation(localFile: string) {
   await rclone([
     'copyto',
     localFile,
-    `${remoteProjectRoot(installation)}/annotations/${path.basename(localFile)}`,
+    `${remoteUnimarSourceRoot(installation)}/annotations/${path.basename(localFile)}`,
     '--checksum',
   ]);
   return true;
@@ -149,7 +161,7 @@ export async function backupPublishedImage(localFile: string) {
   await rclone([
     'copyto',
     localFile,
-    `${remoteProjectRoot(installation)}/images/${path.basename(localFile)}`,
+    `${remoteUnimarSourceRoot(installation)}/images/${path.basename(localFile)}`,
     '--checksum',
   ]);
   return true;
@@ -160,13 +172,14 @@ export async function syncDatasetToDrive() {
   if (!installation) throw new Error('Google Drive nao configurado.');
   return rclone(
     [
-      'copy',
-      farmPaths.annotationRoot,
-      remoteProjectRoot(installation),
+      'sync',
+      farmPaths.datasets,
+      remoteDatasetsRoot(installation),
       '--checksum',
       '--create-empty-src-dirs',
+      '--backup-dir', remoteDatasetHistoryRoot(installation, new Date().toISOString().replace(/[:.]/g, '-')),
       '--stats-one-line',
     ],
-    10 * 60_000,
+    2 * 60 * 60_000,
   );
 }

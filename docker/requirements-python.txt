@@ -1,0 +1,4 @@
+# Keep these versions aligned with FarmGuard/Iazinha/requirements.txt.
+Pillow==12.3.0
+torch==2.14.0
+ultralytics==8.4.161

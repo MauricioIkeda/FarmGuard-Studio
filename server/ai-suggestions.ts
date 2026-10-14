@@ -5,6 +5,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { farmPaths } from './config.js';
 import { getAnnotation, resolveAnnotationImage, type AnnotationBox } from './farmguard.js';
+import { iaApiConfigured, predictPromotedImage } from './ia-api.js';
 
 type WorkerPrediction = {
   model: string;
@@ -31,6 +32,18 @@ export async function suggestBoxes(key: string) {
     if (annotation.excluded) throw new Error('Restaure a imagem antes de pedir sugestões da IA.');
     const imagePath = await resolveAnnotationImage(annotation);
     await fs.access(imagePath);
+
+    if (iaApiConfigured()) {
+      const prediction = await predictPromotedImage(imagePath);
+      if (prediction.image.width !== annotation.width || prediction.image.height !== annotation.height) {
+        throw new Error('A IA API retornou dimensões diferentes da imagem do anotador.');
+      }
+      const boxes = prediction.detections.map(({ box_px }) => box_px);
+      if (!boxes.every((box) => validBox(box, annotation.width, annotation.height))) {
+        throw new Error('A IA API retornou uma box fora dos limites da imagem.');
+      }
+      return { key, model: prediction.model.name, boxes };
+    }
 
     const python = process.platform === 'win32'
       ? path.join(farmPaths.ia, '.venv', 'Scripts', 'python.exe')

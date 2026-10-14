@@ -4,14 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-test('move trap as a group and reapply its saved split after a rebuild', async () => {
+test('move one image, preserve mixed traps, and reapply its saved split after a rebuild', async () => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'farmguard-studio-split-test-'));
   process.env.FARMGUARD_ROOT = path.join(temp, 'farmguard');
   process.env.STUDIO_DATA_ROOT = path.join(temp, 'studio-data');
   process.env.ALLOW_FARMGUARD_JOBS = 'true';
   const root = path.join(process.env.FARMGUARD_ROOT, 'Iazinha');
-  const yolo = path.join(root, 'DatasetYolo');
-  const annotations = path.join(root, 'DatasetCreator', 'Insect AI Datasets', 'traps_events', 'annotations');
+  const yolo = path.join(root, 'Datasets', 'datasetUnimar', 'DatasetYolo');
+  const annotations = path.join(root, 'Datasets', 'datasetUnimar', 'source', 'traps_events', 'annotations');
   const imagePath = (split: string, image: string) => path.join(yolo, 'images', split, `${image}.jpg`);
   const labelPath = (split: string, image: string) => path.join(yolo, 'labels', split, `${image}.txt`);
   async function add(split: string, trap: string, image: string) {
@@ -27,20 +27,25 @@ test('move trap as a group and reapply its saved split after a rebuild', async (
     await add('train', 'A', 'a2');
     await add('train', 'C', 'c1');
     await add('val', 'B', 'b1');
-    const { listDatasetImages, moveTrap, reapplySplitOverrides } = await import('./dataset-split.js');
+    await fs.mkdir(process.env.STUDIO_DATA_ROOT, { recursive: true });
+    await fs.writeFile(path.join(process.env.STUDIO_DATA_ROOT, 'dataset-split-overrides.json'),
+      JSON.stringify({ version: 1, traps: { A: 'train' } }));
+    const { listDatasetImages, moveImage, reapplySplitOverrides } = await import('./dataset-split.js');
     assert.equal((await listDatasetImages()).length, 4);
-    await moveTrap('A', 'val');
-    assert.equal((await listDatasetImages()).filter((item) => item.trap === 'A' && item.split === 'val').length, 2);
+    await moveImage('a1.jpg', 'val');
+    const saved = JSON.parse(await fs.readFile(path.join(process.env.STUDIO_DATA_ROOT, 'dataset-split-overrides.json'), 'utf8'));
+    assert.equal(saved.version, 2);
+    assert.equal(saved.images['a1.jpg'], 'val');
+    assert.equal((await listDatasetImages()).filter((item) => item.trap === 'A' && item.split === 'val').length, 1);
+    assert.equal((await listDatasetImages()).find((item) => item.image === 'a2.jpg')?.split, 'train');
     await fs.rename(imagePath('val', 'a1'), imagePath('train', 'a1'));
     await fs.rename(labelPath('val', 'a1'), labelPath('train', 'a1'));
-    await fs.rename(imagePath('val', 'a2'), imagePath('train', 'a2'));
-    await fs.rename(labelPath('val', 'a2'), labelPath('train', 'a2'));
-    assert.equal((await listDatasetImages()).filter((item) => item.trap === 'A' && item.desiredSplit !== item.split).length, 2);
+    assert.equal((await listDatasetImages()).filter((item) => item.desiredSplit !== item.split).length, 1);
     await reapplySplitOverrides();
-    assert.equal((await listDatasetImages()).filter((item) => item.trap === 'A' && item.split === 'val').length, 2);
-    await assert.rejects(() => moveTrap('C', 'val'), /sem imagens/);
-    await moveTrap('A', 'train');
-    assert.equal((await listDatasetImages()).filter((item) => item.trap === 'A' && item.split === 'train' && item.desiredSplit === 'train').length, 2);
+    assert.equal((await listDatasetImages()).find((item) => item.image === 'a1.jpg')?.split, 'val');
+    await moveImage('a1.jpg', 'train');
+    await assert.rejects(() => moveImage('b1.jpg', 'train'), /sem imagens/);
+    assert.equal((await listDatasetImages()).find((item) => item.image === 'a1.jpg')?.desiredSplit, 'train');
   } finally {
     assert.ok(temp.startsWith(os.tmpdir() + path.sep));
     await fs.rm(temp, { recursive: true, force: true });
