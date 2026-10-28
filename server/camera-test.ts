@@ -3,8 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, farmPaths, studioRoot } from './config.js';
-import { promotedModel, readCalibration, resolveModel } from './model-management.js';
-import { getPromotedModel, iaApiConfigured, predictPromotedImage } from './ia-api.js';
+import { inferenceSettingsForModel, resolveModel } from './model-management.js';
+import { assertApiSettings, getPromotedModel, iaApiConfigured, predictPromotedImage } from './ia-api.js';
 
 const root = path.join(config.dataRoot, 'camera-tests');
 const maxAgeMs = 24 * 60 * 60 * 1000;
@@ -80,12 +80,12 @@ export async function createCameraTest(modelId: string, body: Buffer, contentTyp
   const testDir = directory(id);
   try {
     const model = await resolveModel(modelId);
-    const principal = iaApiConfigured() && modelId === (await promotedModel())?.sourceModelId;
-    const calibration = await readCalibration(modelId);
-    const best = calibration && !calibration.stale ? calibration.best : null;
+    const settings = await inferenceSettingsForModel(modelId);
+    const principal = iaApiConfigured() && settings.source === 'promoted';
     const apiModel = principal ? await getPromotedModel() : null;
-    const confidence = apiModel?.confidence ?? best?.confidence ?? 0.2;
-    const iou = apiModel?.nms_iou ?? best?.nms_iou ?? 0.4;
+    if (apiModel) assertApiSettings(apiModel, settings);
+    const confidence = settings.confidence;
+    const iou = settings.nmsIou;
     await fs.mkdir(testDir, { recursive: true });
     const original = path.join(testDir, `original${ext}`);
     const annotated = path.join(testDir, 'annotated.jpg');
@@ -101,10 +101,11 @@ export async function createCameraTest(modelId: string, body: Buffer, contentTyp
       await fs.unlink(predictionFile);
     } else {
       result = await runInference(['--model', model.path, '--image', original, '--output', annotated,
-        '--confidence', String(confidence), '--iou', String(iou)]);
+        '--confidence', String(confidence), '--iou', String(iou),
+        '--imgsz', String(settings.imgsz), '--max-det', String(settings.maxDet)]);
     }
     const metadata = { id, modelId, modelName: modelId.replace(/^(run|model):/, ''),
-      confidence, nmsIou: iou, calibrated: Boolean(apiModel || best), ...result,
+      confidence, nmsIou: iou, calibrated: settings.source !== 'defaults', settingsSource: settings.source, imgsz: settings.imgsz, maxDet: settings.maxDet, ...result,
       originalUrl: `/api/camera-test/${id}/original`, annotatedUrl: `/api/camera-test/${id}/annotated` };
     await fs.writeFile(path.join(testDir, 'result.json'), `${JSON.stringify(metadata)}\n`, 'utf8');
     return metadata;

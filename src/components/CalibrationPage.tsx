@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, CircleAlert, Maximize2, Minus, Plus, RefreshCw, SlidersHorizontal, X } from 'lucide-react';
+import { inferenceSourceLabel } from '../types';
 import { api } from '../api';
 import { PredictionComparison } from './PredictionComparison';
 import type { DatasetImage, Job, Model, Overview } from '../types';
@@ -11,8 +12,8 @@ type Preview = { id: string; image: string; results: Array<{
 }>; requestKey: string };
 type View = { zoom: number; x: number; y: number };
 const defaultSettings = (model?: Model): Settings => ({ modelId: model?.id || '',
-  confidence: model?.calibration && !model.calibration.stale ? model.calibration.best.confidence : 0.2,
-  iou: model?.calibration && !model.calibration.stale ? model.calibration.best.nms_iou : 0.4 });
+  confidence: model?.inference.confidence ?? 0.2,
+  iou: model?.inference.nmsIou ?? 0.4 });
 const uncertainImage = '4cdb44d3-01be-11f1-bfd8-714d57fb7ac5.jpg';
 
 function ThresholdControl({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
@@ -84,7 +85,7 @@ export function CalibrationPage({ data, initialModelId, onRefresh, onOperations 
     if (!applySavedModelId || a.modelId !== applySavedModelId) return;
     const updated = models.find((item) => item.id === applySavedModelId);
     if (!updated?.calibration || updated.calibration.stale) return;
-    setA(defaultSettings(updated));
+    setA({ modelId: updated.id, confidence: updated.calibration.best.confidence, iou: updated.calibration.best.nms_iou });
     setApplySavedModelId(null);
   }, [applySavedModelId, data.models]);
   useEffect(() => { setView({ zoom: 1, x: 0, y: 0 }); }, [file, compare]);
@@ -213,12 +214,13 @@ export function CalibrationPage({ data, initialModelId, onRefresh, onOperations 
       <div className={`calibration-settings ${compare ? 'paired' : ''}`}>{selections.map((setting, index) => <div className="calibration-setting" key={index}>
         <strong>{compare ? `Modelo ${index === 0 ? 'A' : 'B'}` : 'Modelo'}</strong>
         <select value={setting.modelId} onChange={(event) => changeModel(index === 0 ? 'a' : 'b', event.target.value)}>{models.map((model) => <option key={model.id} value={model.id}>{model.isPromoted ? '★ ' : ''}{model.name}</option>)}</select>
+        <small>Valores iniciais: {inferenceSourceLabel(models.find((model) => model.id === setting.modelId)?.inference.source || 'defaults')}. Controles abaixo: ajuste experimental.</small>
         <ThresholdControl label="Confiança" value={setting.confidence} onChange={(value) => index === 0 ? setA({ ...a, confidence: value }) : setB({ ...b, confidence: value })} />
         <ThresholdControl label="NMS IoU" value={setting.iou} onChange={(value) => index === 0 ? setA({ ...a, iou: value }) : setB({ ...b, iou: value })} />
       </div>)}</div>
       <div className="calibration-actions"><button className="secondary-button" disabled={!data.operationsEnabled || Boolean(activeJob) || previewBusy || saving} onClick={() => void calibrate(false)}><SlidersHorizontal />Calibrar automaticamente o modelo A</button>
         <button className="primary-button" disabled={!data.operationsEnabled || Boolean(activeJob) || previewBusy || saving} onClick={() => void calibrate(true)}>Salvar ajuste manual do modelo A</button></div>
-      <p className="calibration-explainer">Salvar o ajuste manual avalia a combinação em todas as fotos de validação. A calibração automática testa 9.801 pares, em passos de 0,01 para confiança e NMS IoU; pode levar alguns minutos. Nenhuma das duas altera o modelo publicado sem uma promoção posterior.</p>
+      <p className="calibration-explainer">Salvar o ajuste manual avalia a combinação em todas as fotos de validação. A calibração automática testa 9.801 pares, em passos de 0,01 para confiança e NMS IoU; pode levar alguns minutos. Nenhuma das duas altera o modelo publicado sem uma promoção posterior. Ambas aceitam JPEG, PNG e WebP e desconsideram detecções sem correspondência com insetos anotados quando pelo menos 50% da caixa está em áreas incertas. Detecções de insetos anotados e suas duplicatas continuam sendo avaliadas; correspondência usa IoU ≥ 0,30.</p>
       {activeJob?.type === 'tune' && <div className="model-calibration-progress"><SlidersHorizontal size={18} /><span>Calibração em andamento. Os resultados aparecerão no catálogo.</span><button onClick={onOperations}>Abrir terminal</button></div>}
       {message && !activeJob && <div className="model-notice">{message}</div>}
       {error && <div className="inline-error"><CircleAlert />{error}</div>}
@@ -233,8 +235,8 @@ export function CalibrationPage({ data, initialModelId, onRefresh, onOperations 
       <p className="prediction-compare-hint">Arraste ou use dois dedos para mover e ampliar. Ao alterar os limiares, o PC refaz a predição desta foto; pode levar alguns segundos.</p>
     </section>
     <section className="panel"><div className="panel-head"><div><span className="eyebrow">Modelo A</span><h2>Ajustes salvos</h2></div><span className="status-pill">{savedCalibration?.mode === 'manual' ? 'Escolha manual' : 'Varredura automática'}</span></div>
-      {savedCalibration && !savedCalibration.stale ? <div className="table-wrap"><table><thead><tr><th>Confiança</th><th>NMS IoU</th><th>Precisão</th><th>Recall</th><th>F1</th><th>TP</th><th>FP</th><th>FN</th><th>Correções estimadas</th></tr></thead><tbody>
-        {savedCalibration.rows.slice(0, 8).map((row, index) => <tr key={index}><td><strong>{row.confidence.toFixed(2)}</strong></td><td>{row.nms_iou.toFixed(2)}</td><td>{(row.precision * 100).toFixed(1)}%</td><td>{(row.recall * 100).toFixed(1)}%</td><td>{(row.f1 * 100).toFixed(1)}%</td><td>{row.tp}</td><td>{row.fp}</td><td>{row.fn}</td><td>{row.edit_proxy}</td></tr>)}
+      {savedCalibration && !savedCalibration.stale ? <div className="table-wrap"><table><thead><tr><th>Confiança</th><th>NMS IoU</th><th>Precisão</th><th>Recall</th><th>F1</th><th>TP</th><th>FP</th><th>FN</th><th>Ignoradas</th><th>Correções estimadas</th></tr></thead><tbody>
+        {savedCalibration.rows.slice(0, 8).map((row, index) => <tr key={index}><td><strong>{row.confidence.toFixed(2)}</strong></td><td>{row.nms_iou.toFixed(2)}</td><td>{(row.precision * 100).toFixed(1)}%</td><td>{(row.recall * 100).toFixed(1)}%</td><td>{(row.f1 * 100).toFixed(1)}%</td><td>{row.tp}</td><td>{row.fp}</td><td>{row.fn}</td><td>{row.ignored_predictions ?? 0}</td><td>{row.edit_proxy}</td></tr>)}
       </tbody></table></div> : <p className="calibration-explainer">{savedCalibration?.stale ? 'A validação mudou; recalibre para comparar resultados atuais.' : 'Ainda não há ajuste salvo para este modelo.'}</p>}
     </section>
     <PredictionComparison predictions={data.predictions} />

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.js';
+import type { InferenceSettings } from './model-management.js';
 
 export type ApiPrediction = {
   model: { name: string; sha256: string };
@@ -9,7 +10,13 @@ export type ApiPrediction = {
   detections: Array<{ confidence: number; box_px: { x: number; y: number; width: number; height: number } }>;
 };
 
-export type ApiModel = { name: string; sha256: string; confidence: number; nms_iou: number };
+export type ApiModel = { name: string; sha256: string; confidence: number; nms_iou: number; imgsz: number; max_det: number };
+
+export function assertApiSettings(model: ApiModel, settings: InferenceSettings) {
+  if (model.sha256.toUpperCase() !== settings.modelSha256 || model.confidence !== settings.confidence ||
+      model.nms_iou !== settings.nmsIou || model.imgsz !== settings.imgsz || model.max_det !== settings.maxDet)
+    throw new Error('A IA API está usando outro peso ou outros parâmetros. Recarregue a IA API após a promoção e tente novamente.');
+}
 
 export function iaApiConfigured() { return Boolean(config.iaApiInternalUrl); }
 
@@ -52,6 +59,8 @@ export async function getPromotedModel(): Promise<ApiModel> {
   const response = await fetch(endpoint('/v1/model'), { headers: headers(), signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`IA API retornou HTTP ${response.status} ao consultar o modelo.`);
   const result = await response.json() as ApiModel;
-  if (!result.name || !Number.isFinite(result.confidence) || !Number.isFinite(result.nms_iou)) throw new Error('Modelo inválido na IA API.');
+  if (!result.name || typeof result.sha256 !== 'string' || !Number.isFinite(result.confidence) ||
+      !Number.isFinite(result.nms_iou) || !Number.isInteger(result.imgsz) || !Number.isInteger(result.max_det))
+    throw new Error('Modelo inválido na IA API.');
   return result;
 }

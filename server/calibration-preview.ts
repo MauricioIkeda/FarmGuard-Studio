@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, farmPaths, studioRoot } from './config.js';
 import { datasetImagePath } from './dataset-split.js';
-import { resolveModel } from './model-management.js';
+import { inferenceSettingsForModel, resolveModel, type InferenceSettings } from './model-management.js';
 
 const root = path.join(config.dataRoot, 'calibration-previews');
 const idPattern = /^[0-9a-f-]{36}$/i;
@@ -17,14 +17,15 @@ export function validThreshold(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0.01 && value <= 0.99;
 }
 
-function runPreview(model: string, image: string, output: string, confidence: number, iou: number) {
+function runPreview(model: string, image: string, output: string, confidence: number, iou: number, settings: InferenceSettings) {
   const python = process.platform === 'win32'
     ? path.join(farmPaths.ia, '.venv', 'Scripts', 'python.exe')
     : path.join(farmPaths.ia, '.venv', 'bin', 'python');
   const script = path.join(studioRoot, 'server', 'python', 'test_image.py');
   return new Promise<{ width: number; height: number; detections: number; boxes: Array<{ xyxy: number[]; confidence: number }> }>((resolve, reject) => {
     const child = spawn(python, [script, '--model', model, '--image', image, '--output', output,
-      '--confidence', String(confidence), '--iou', String(iou)], { cwd: farmPaths.training, windowsHide: true, shell: false });
+      '--confidence', String(confidence), '--iou', String(iou),
+      '--imgsz', String(settings.imgsz), '--max-det', String(settings.maxDet)], { cwd: farmPaths.training, windowsHide: true, shell: false });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -68,7 +69,7 @@ export async function createCalibrationPreview(imageName: string, selections: Pr
       for (let index = 0; index < selections.length; index += 1) {
         const output = path.join(directory, `${index}.jpg`);
         const result = await runPreview(models[index].path, image, output,
-          selections[index].confidence, selections[index].iou);
+          selections[index].confidence, selections[index].iou, await inferenceSettingsForModel(selections[index].modelId));
         results.push({ ...result, url: `/api/calibration/preview/${id}/${index}` });
       }
       return { id, image: imageName, results };

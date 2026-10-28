@@ -11,8 +11,10 @@ def main():
     parser = argparse.ArgumentParser(description="Predicao configuravel iniciada pelo FarmGuard Studio.")
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", default="studio-predict")
-    parser.add_argument("--confidence", type=float, default=None)
-    parser.add_argument("--iou", type=float, default=None)
+    parser.add_argument("--confidence", type=float, required=True)
+    parser.add_argument("--iou", type=float, required=True)
+    parser.add_argument("--imgsz", type=int, default=1280)
+    parser.add_argument("--max-det", type=int, default=1000)
     args = parser.parse_args()
 
     farmguard_root = Path(
@@ -22,19 +24,14 @@ def main():
         )
     )
     ia_root = farmguard_root / "Iazinha"
-    config_path = ia_root / "Models" / "insect-detector.json"
-    config = {}
-    if config_path.exists():
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-
     model = YOLO(args.model)
     prediction_root = ia_root / "Training" / "predictions"
     results = model.predict(
         source=str(ia_root / "Datasets" / "datasetUnimar" / "DatasetYolo" / "images" / "val"),
-        imgsz=int(config.get("imgsz", 1280)),
-        conf=args.confidence if args.confidence is not None else float(config.get("confidence", 0.2)),
-        iou=args.iou if args.iou is not None else float(config.get("nms_iou", 0.4)),
-        max_det=int(config.get("max_det", 1000)),
+        imgsz=args.imgsz,
+        conf=args.confidence,
+        iou=args.iou,
+        max_det=args.max_det,
         device=0,
         save=True,
         project=str(prediction_root),

@@ -8,12 +8,22 @@ export type ThresholdRow = {
   confidence: number; nms_iou: number; match_iou: number;
   ground_truth: number; predictions: number; tp: number; fp: number; fn: number;
   precision: number; recall: number; f1: number; edit_proxy: number;
+  ignored_predictions?: number;
 };
+
+export type InferenceSettings = {
+  confidence: number; nmsIou: number; imgsz: number; maxDet: number;
+  source: 'promoted' | 'calibration' | 'defaults'; modelSha256?: string;
+};
+export const calibrationProtocol = 'ignore-regions-v1';
 
 export type Calibration = {
   modelId: string;
   modelFingerprint: string;
   datasetSignature: string;
+  protocol?: string;
+  imgsz?: number;
+  maxDet?: number;
   mode?: 'automatic' | 'manual';
   calibratedAt: string;
   best: ThresholdRow;
@@ -29,6 +39,8 @@ export type CalibrationContext = {
   modelFingerprint: string;
   datasetSignature: string;
   output: string;
+  imgsz?: number;
+  maxDet?: number;
   mode?: 'automatic' | 'manual';
 };
 
@@ -74,6 +86,7 @@ function fingerprint(stat: { size: number; mtimeMs: number }) {
 
 export async function validationDatasetSignature() {
   const hash = crypto.createHash('sha256');
+  hash.update(calibrationProtocol);
   const imageRoot = path.join(farmPaths.yolo, 'images', 'val');
   const labelRoot = path.join(farmPaths.yolo, 'labels', 'val');
   const names = (await fs.readdir(imageRoot)).filter((name) => /\.(jpe?g|png|webp)$/i.test(name)).sort();
@@ -82,6 +95,7 @@ export async function validationDatasetSignature() {
     const imageStat = await fs.stat(path.join(imageRoot, name));
     hash.update(`${name}:${imageStat.size}:${imageStat.mtimeMs}\n`);
     hash.update(await fs.readFile(path.join(labelRoot, `${path.parse(name).name}.txt`)));
+    hash.update(await fs.readFile(path.join(farmPaths.annotationRoot, 'annotations', `${path.parse(name).name}.json`)));
   }
   return hash.digest('hex');
 }
@@ -94,7 +108,7 @@ export async function readCalibration(id: string, datasetSignature?: string) {
     return {
       ...calibration,
       stale: calibration.modelId !== id || calibration.modelFingerprint !== fingerprint(model.stat) ||
-        calibration.datasetSignature !== currentDataset,
+        calibration.datasetSignature !== currentDataset || calibration.protocol !== calibrationProtocol,
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -103,25 +117,33 @@ export async function readCalibration(id: string, datasetSignature?: string) {
 }
 
 export async function calibrationForModels(models: Array<{ id: string }>) {
-  const signature = await validationDatasetSignature();
+  let signature: string;
+  try {
+    signature = await validationDatasetSignature();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    signature = 'validation-dataset-unavailable';
+  }
   return Promise.all(models.map((model) => readCalibration(model.id, signature)));
 }
 
 export async function prepareCalibration(modelId: string) {
   const model = await resolveModel(modelId);
+  const settings = await inferenceSettingsForModel(modelId);
   return {
     modelId,
     modelPath: model.path,
     modelFingerprint: fingerprint(model.stat),
     datasetSignature: await validationDatasetSignature(),
     output: path.join(calibrationRoot, 'sweeps', `${crypto.randomUUID()}.csv`),
+    imgsz: settings.imgsz, maxDet: settings.maxDet,
   } satisfies CalibrationContext;
 }
 
 function parseSweep(csv: string): ThresholdRow[] {
   const lines = csv.trim().split(/\r?\n/);
   const headers = lines.shift()?.split(',') || [];
-  const expected = ['confidence', 'nms_iou', 'match_iou', 'ground_truth', 'predictions', 'tp', 'fp', 'fn', 'precision', 'recall', 'f1', 'edit_proxy'];
+  const expected = ['confidence', 'nms_iou', 'match_iou', 'ground_truth', 'predictions', 'tp', 'fp', 'fn', 'precision', 'recall', 'f1', 'edit_proxy', 'ignored_predictions'];
   if (expected.some((field) => !headers.includes(field)) || !lines.length) throw new Error('Resultado de calibração inválido.');
   return lines.map((line) => {
     const columns = line.split(',');
@@ -143,6 +165,8 @@ export async function finishCalibration(context: CalibrationContext) {
     modelId: context.modelId,
     modelFingerprint: context.modelFingerprint,
     datasetSignature: context.datasetSignature,
+    protocol: calibrationProtocol,
+    imgsz: context.imgsz ?? 1280, maxDet: context.maxDet ?? 1000,
     mode: context.mode || 'automatic',
     calibratedAt: new Date().toISOString(),
     best: rows[0], rows: rows.slice(0, 20),
@@ -188,6 +212,26 @@ export async function isPromotedCopy(sourcePath: string) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
   }
+}
+
+export async function inferenceSettingsForModel(id: string, saved?: Awaited<ReturnType<typeof readCalibration>>): Promise<InferenceSettings> {
+  const model = await resolveModel(id);
+  const direct = model.path === await fs.realpath(promotedWeight).catch(() => promotedWeight);
+  if (direct || await isPromotedCopy(model.path)) {
+    const document = JSON.parse(await fs.readFile(promotedConfig, 'utf8'));
+    const checksum = await sha256(model.path);
+    if (typeof document.model_sha256 !== 'string' || document.model_sha256.toUpperCase() !== checksum)
+      throw new Error('O peso principal diverge da configuração publicada. Verifique a promoção antes de executar a inferência.');
+    if (![document.confidence, document.nms_iou].every((value) => typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1) ||
+        ![document.imgsz, document.max_det].every((value) => Number.isInteger(value) && value > 0))
+      throw new Error('Parâmetros publicados de inferência inválidos.');
+    return { confidence: document.confidence, nmsIou: document.nms_iou, imgsz: document.imgsz,
+      maxDet: document.max_det, source: 'promoted', modelSha256: checksum };
+  }
+  const calibration = saved === undefined ? await readCalibration(id) : saved;
+  if (calibration && !calibration.stale) return { confidence: calibration.best.confidence,
+    nmsIou: calibration.best.nms_iou, imgsz: calibration.imgsz ?? 1280, maxDet: calibration.maxDet ?? 1000, source: 'calibration' };
+  return { confidence: 0.2, nmsIou: 0.4, imgsz: 1280, maxDet: 1000, source: 'defaults' };
 }
 
 async function sha256(file: string) {
@@ -258,12 +302,13 @@ export async function promoteModel(modelId: string) {
       name: sourceName,
       architecture: info.architecture,
       model_sha256: checksum,
-      imgsz: 1280,
+      imgsz: calibration.imgsz ?? 1280,
       confidence: calibration.best.confidence,
       nms_iou: calibration.best.nms_iou,
-      max_det: 1000,
+      max_det: calibration.maxDet ?? 1000,
       class_names: info.class_names,
       inference_calibration: {
+        protocol: calibration.protocol,
         purpose: 'preannotation_edit_efficiency',
         match_iou: calibration.best.match_iou,
         selection: calibration.mode === 'manual' ? 'manual_review' : 'lowest_fp_plus_fn_then_highest_f1',

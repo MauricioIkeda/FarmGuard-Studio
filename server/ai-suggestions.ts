@@ -5,7 +5,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { farmPaths } from './config.js';
 import { getAnnotation, resolveAnnotationImage, type AnnotationBox } from './farmguard.js';
-import { iaApiConfigured, predictPromotedImage } from './ia-api.js';
+import { assertApiSettings, getPromotedModel, iaApiConfigured, predictPromotedImage } from './ia-api.js';
+import { inferenceSettingsForModel } from './model-management.js';
 
 type WorkerPrediction = {
   model: string;
@@ -32,9 +33,13 @@ export async function suggestBoxes(key: string) {
     if (annotation.excluded) throw new Error('Restaure a imagem antes de pedir sugestões da IA.');
     const imagePath = await resolveAnnotationImage(annotation);
     await fs.access(imagePath);
+    const settings = await inferenceSettingsForModel('model:insect-detector.pt');
 
     if (iaApiConfigured()) {
+      assertApiSettings(await getPromotedModel(), settings);
       const prediction = await predictPromotedImage(imagePath);
+      if (prediction.model.sha256.toUpperCase() !== settings.modelSha256)
+        throw new Error('O modelo da IA API mudou durante a análise; tente novamente.');
       if (prediction.image.width !== annotation.width || prediction.image.height !== annotation.height) {
         throw new Error('A IA API retornou dimensões diferentes da imagem do anotador.');
       }

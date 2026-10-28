@@ -17,6 +17,11 @@ export type Run = {
   history: MetricHistory[];
 };
 
+export type InferenceSource = 'promoted' | 'calibration' | 'defaults';
+export const inferenceSourceLabel = (source: InferenceSource) => ({
+  promoted: 'Ajuste publicado', calibration: 'Calibração atual', defaults: 'Valores padrão',
+})[source];
+
 export type Model = {
   id: string;
   name: string;
@@ -26,12 +31,14 @@ export type Model = {
   modifiedAt: string;
   calibration: ModelCalibration | null;
   isPromoted: boolean;
+  inference: { confidence: number; nmsIou: number; imgsz: number; maxDet: number; source: InferenceSource };
 };
 
 export type ThresholdRow = {
   confidence: number; nms_iou: number; match_iou: number;
   ground_truth: number; predictions: number; tp: number; fp: number; fn: number;
   precision: number; recall: number; f1: number; edit_proxy: number;
+  ignored_predictions?: number;
 };
 
 export type ModelCalibration = {
@@ -166,6 +173,7 @@ export type CameraTest = {
   confidence: number;
   nmsIou: number;
   calibrated: boolean;
+  settingsSource: InferenceSource;
   width: number;
   height: number;
   detections: number;

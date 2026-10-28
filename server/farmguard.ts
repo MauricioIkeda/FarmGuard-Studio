@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config, farmPaths } from './config.js';
 import { backupDraft, driveStatus } from './drive.js';
 import { dimensions, imageFor, sourceImage, sourceImages } from './annotation-source.js';
-import { calibrationForModels, isPromotedCopy, promotedModel } from './model-management.js';
+import { calibrationForModels, inferenceSettingsForModel, isPromotedCopy, promotedModel } from './model-management.js';
 
 export type AnnotationBox = {
   x: number;
@@ -289,6 +289,7 @@ export async function overview() {
     .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
   const calibrations = models.length ? await calibrationForModels(models) : [];
   const promotedId = hideCopy ? source.id : 'model:insect-detector.pt';
+  const inference = await Promise.all(models.map((model, index) => inferenceSettingsForModel(model.id, calibrations[index])));
   return {
     connected: await exists(config.farmGuardRoot),
     farmGuardRoot: config.farmGuardRoot,
@@ -306,7 +307,7 @@ export async function overview() {
         .sort((a, b) => b.count - a.count),
     },
     runs: runs.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
-    models: models.map((model, index) => ({ ...model, calibration: calibrations[index] || null,
+    models: models.map((model, index) => ({ ...model, calibration: calibrations[index] || null, inference: inference[index],
       isPromoted: Boolean(promoted) && model.id === promotedId })),
     promoted,
     predictions: predictions.sort((a, b) =>

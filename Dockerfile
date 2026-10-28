@@ -29,6 +29,9 @@ RUN python3 -m venv /farmguard/Iazinha/.venv \
     && /farmguard/Iazinha/.venv/bin/python -m pip install -r /tmp/requirements-python.txt \
     && rm /tmp/requirements-python.txt
 
+RUN /farmguard/Iazinha/.venv/bin/python -m pip install pi-heif==1.4.0
+ENV YOLO_AUTOINSTALL=false
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

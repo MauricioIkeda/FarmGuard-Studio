@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hand, Maximize, Minus, MousePointer2, Pencil, Plus, Scan } from 'lucide-react';
+import { Hand, LoaderCircle, Maximize, Minus, MousePointer2, Pencil, Plus, RefreshCw, Scan } from 'lucide-react';
 import type { Box } from '../types';
 import { resizeHandleAt, resizeFromHandle, smallestBoxAt, type Point, type ResizeHandle } from '../annotation-geometry';
 
@@ -41,6 +41,8 @@ export function AnnotationCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 820 });
   const [view, setView] = useState({ scale: 0.25, x: 20, y: 20 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
@@ -80,16 +82,29 @@ export function AnnotationCanvas({
   useEffect(() => { if (imageRef.current) fit(); }, [canvasSize.width, canvasSize.height, imageWidth, imageHeight]);
 
   useEffect(() => {
+    let active = true;
     const image = new Image();
-    image.src = imageUrl;
+    imageRef.current = null;
+    setImageState('loading');
+    setGesture(null);
+    pointers.current.clear();
+    pinch.current = null;
+    image.fetchPriority = 'high';
     image.onload = () => {
+      if (!active) return;
       imageRef.current = image;
+      setImageState('ready');
       fit();
     };
+    image.onerror = () => { if (active) setImageState('error'); };
+    image.src = imageUrl;
     return () => {
+      active = false;
+      image.onload = null;
+      image.onerror = null;
       imageRef.current = null;
     };
-  }, [imageUrl, imageWidth, imageHeight]);
+  }, [imageUrl, imageWidth, imageHeight, loadAttempt]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -157,7 +172,7 @@ export function AnnotationCanvas({
       context.strokeRect(left, top, Math.abs(gesture.current.x - gesture.start.x), Math.abs(gesture.current.y - gesture.start.y));
     }
     context.restore();
-  }, [boxes, ignoreRegions, selected, selectedIgnore, view, gesture, imageWidth, imageHeight, canvasSize]);
+  }, [boxes, ignoreRegions, selected, selectedIgnore, view, gesture, imageWidth, imageHeight, canvasSize, imageState]);
 
   const point = (
     event: React.PointerEvent<HTMLCanvasElement> | React.WheelEvent<HTMLCanvasElement>,
@@ -220,6 +235,7 @@ export function AnnotationCanvas({
   };
 
   const pointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (imageState !== 'ready') return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const screen = point(event);
     pointers.current.set(event.pointerId, screen);
@@ -391,6 +407,7 @@ export function AnnotationCanvas({
         onPointerUp={pointerUp}
         onPointerCancel={(event) => { pointers.current.delete(event.pointerId); pinch.current = null; setGesture(null); }}
       />
+      {imageState !== 'ready' && <div className="canvas-image-status" role="status">{imageState === 'error' ? <><span>Não foi possível carregar a foto.</span><button className="secondary-button" onClick={() => setLoadAttempt((value) => value + 1)}><RefreshCw size={16} />Tentar novamente</button></> : <><LoaderCircle className="spin" size={20} /><span>Carregando foto original…</span></>}</div>}
       </div>
       <div className="canvas-instructions">Toque numa box para selecioná-la. Arraste seu interior para mover, ou qualquer ponto da borda para redimensionar. Em Marcar, arraste fora da box selecionada para criar outra; Shift + arrastar força uma nova box por cima. Dois dedos aproximam e arrastam a foto.</div>
     </div>

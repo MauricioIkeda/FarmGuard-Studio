@@ -52,7 +52,7 @@ export const api = {
     if (!response.ok) throw new Error(body.error || `Falha HTTP ${response.status}`);
     return body as { count: number };
   },
-  annotation: (key: string) => request<Annotation>(`/api/annotations/${key}`),
+  annotation: (key: string, signal?: AbortSignal) => request<Annotation>(`/api/annotations/${key}`, { signal, cache: 'no-store' }),
   saveAnnotation: (annotation: Annotation) =>
     request<Annotation>(`/api/annotations/${annotation.key}`, {
       method: 'PUT',

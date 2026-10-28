@@ -7,7 +7,7 @@ import { config, farmPaths } from './config.js';
 import { discoverDrive, remoteDatasetHistoryRoot, remoteDatasetsRoot, remoteUnimarSourceRoot } from './drive.js';
 import { studioRoot } from './config.js';
 import { reapplySplitOverrides } from './dataset-split.js';
-import { finishCalibration, modelIdForPath, prepareCalibration, readCalibration, resolveModel, type CalibrationContext } from './model-management.js';
+import { finishCalibration, modelIdForPath, prepareCalibration, inferenceSettingsForModel, resolveModel, type CalibrationContext } from './model-management.js';
 
 export type JobType = 'train' | 'validate' | 'predict' | 'tune' | 'dataset' | 'drive' | 'drive-pull' | 'drive-datasets';
 export type Job = {
@@ -113,20 +113,22 @@ async function buildCommand(type: JobType, options: Record<string, unknown>, cal
       calibration.mode = 'manual';
       return [python, path.join(studioRoot, 'server', 'python', 'manual_calibration.py'),
         '--model', calibration.modelPath, '--dataset', farmPaths.yolo, '--output', calibration.output,
-        '--confidence', String(confidence), '--iou', String(iou)];
+        '--confidence', String(confidence), '--iou', String(iou),
+        '--imgsz', String(calibration.imgsz), '--max-det', String(calibration.maxDet)];
     }
     const args = [path.join(studioRoot, 'server', 'python', 'precise_calibration.py')];
-    args.push('--model', calibration.modelPath, '--dataset', farmPaths.yolo, '--output', calibration.output);
+    args.push('--model', calibration.modelPath, '--dataset', farmPaths.yolo, '--output', calibration.output,
+      '--imgsz', String(calibration.imgsz), '--max-det', String(calibration.maxDet));
     return [python, ...args];
   }
   if (type === 'predict') {
     const args = [path.join(studioRoot, 'server', 'python', 'predict.py')];
     const modelId = modelIdForPath(String(options.model || path.join(farmPaths.models, 'insect-detector.pt')));
     const model = await resolveModel(modelId);
-    const calibration = await readCalibration(modelId);
+    const settings = await inferenceSettingsForModel(modelId);
     args.push('--model', model.path);
-    const best = calibration && !calibration.stale ? calibration.best : null;
-    args.push('--confidence', String(best?.confidence ?? 0.2), '--iou', String(best?.nms_iou ?? 0.4));
+    args.push('--confidence', String(settings.confidence), '--iou', String(settings.nmsIou),
+      '--imgsz', String(settings.imgsz), '--max-det', String(settings.maxDet));
     const name = safeName(options.name, `studio-predict-${Date.now()}`);
     try {
       await fs.access(path.join(farmPaths.predictions, name));

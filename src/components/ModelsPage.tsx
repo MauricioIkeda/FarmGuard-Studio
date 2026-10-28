@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, CircleAlert, Crown, FlaskConical, LoaderCircle, Search, SlidersHorizontal, X } from 'lucide-react';
 import { api } from '../api';
+import { inferenceSourceLabel } from '../types';
 import type { Job, Model, Overview } from '../types';
 
 const pct = (value: number) => `${(value * 100).toFixed(1).replace('.', ',')}%`;
@@ -53,6 +54,8 @@ export function ModelsPage({ data, onRefresh, onOperations, onCalibrate }: {
       return <article key={model.id} className={`model-card ${model.isPromoted ? 'promoted' : ''}`}>
         <div className="model-card-top"><div className="model-card-icon"><FlaskConical size={20} /></div><span className={`status-pill ${model.isPromoted ? 'success' : ready ? 'warning' : 'neutral'}`}>{model.isPromoted ? 'Principal' : model.group === 'run' ? 'Experimento' : 'Models'}</span></div>
         <h3 title={model.name}>{model.name}</h3><div className="model-card-meta"><span>{mb(model.size)}</span><span>{new Date(model.modifiedAt).toLocaleDateString('pt-BR')}</span></div>
+        <p>{inferenceSourceLabel(model.inference.source)} em uso: confiança {model.inference.confidence.toFixed(2)} · NMS IoU {model.inference.nmsIou.toFixed(2)} · resolução {model.inference.imgsz} · até {model.inference.maxDet} detecções.</p>
+        {ready && <strong>Resultado da calibração experimental</strong>}
         {ready ? <div className="model-thresholds"><div><span>Confiança</span><strong>{calibration.best.confidence.toFixed(2)}</strong></div><div><span>NMS IoU</span><strong>{calibration.best.nms_iou.toFixed(2)}</strong></div><div><span>F1</span><strong>{pct(calibration.best.f1)}</strong></div><div><span>Correções estimadas</span><strong>{calibration.best.edit_proxy}</strong></div></div>
           : <div className="model-uncalibrated"><SlidersHorizontal size={18} /><div><strong>{calibration?.stale ? 'Calibração desatualizada' : 'Ainda não calibrado'}</strong><span>{calibration?.stale ? 'O peso ou o conjunto de validação mudou.' : 'Teste os limiares para este peso.'}</span></div></div>}
         {ready && <p className="model-calibration-date">{calibration.mode === 'manual' ? 'Ajuste manual' : calibration.testedPairs ? `Calibração automática · ${calibration.testedPairs.toLocaleString('pt-BR')} pares` : 'Calibração automática · grade anterior'} em {new Date(calibration.calibratedAt).toLocaleString('pt-BR')} · {calibration.best.ground_truth} boxes na validação</p>}

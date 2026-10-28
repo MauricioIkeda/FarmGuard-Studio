@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AnnotationThumbnail } from './components/AnnotationThumbnail';
 import {
   Activity,
   Bug,
@@ -36,6 +37,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from './api';
+import { annotationMatchesStatus, annotationQueueCounts, annotationQueueFilters, type AnnotationQueueStatus } from './annotation-queue';
 import { mergeJobs } from './job-sync';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
 import { DatasetSplitPage } from './components/DatasetSplitPage';
@@ -552,6 +554,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   const [index, setIndex] = useState(targetKey ? -1 : 0);
   const targetApplied = useRef(false);
   const [annotation, setAnnotation] = useState<Annotation | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedIgnore, setSelectedIgnore] = useState<number | null>(null);
   type Markings = Pick<Annotation, 'boxes' | 'ignore_regions'>;
@@ -567,7 +570,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   const cancelSuggestionRef = useRef<HTMLButtonElement>(null);
   const currentAnnotationKey = useRef<string | null>(null);
   const [filter, setFilter] = useState('');
-  const [status, setStatus] = useState<'all' | 'pending' | 'reviewed' | 'excluded'>(targetKey ? 'all' : 'pending');
+  const [status, setStatus] = useState<AnnotationQueueStatus>(targetKey ? 'all' : 'pending');
   const [message, setMessage] = useState('');
   const [queueExpanded, setQueueExpanded] = useState(true);
   useEffect(() => {
@@ -577,17 +580,15 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     if (confirmSuggestion) cancelSuggestionRef.current?.focus();
   }, [confirmSuggestion]);
   useEffect(() => () => { currentAnnotationKey.current = null; }, []);
-  const queueCounts = useMemo(() => ({
-    all: list.length,
-    pending: list.filter((item) => !item.reviewed && !item.excluded).length,
-    reviewed: list.filter((item) => item.reviewed && !item.excluded).length,
-    excluded: list.filter((item) => item.excluded).length,
-  }), [list]);
+  const queueCounts = useMemo(() => annotationQueueCounts(list), [list]);
   const visible = useMemo(() => list.filter((item) => {
-    const matchesStatus = status === 'all' || (status === 'pending' ? !item.reviewed && !item.excluded : status === 'reviewed' ? item.reviewed && !item.excluded : item.excluded);
+    const matchesStatus = annotationMatchesStatus(item, status);
     const query = filter.toLocaleLowerCase();
     return matchesStatus && (!query || item.trap?.toLocaleLowerCase().includes(query) || item.image.toLocaleLowerCase().includes(query));
   }), [list, filter, status]);
+  useEffect(() => {
+    if (visible.length && index >= visible.length) setIndex(visible.length - 1);
+  }, [visible.length, index]);
   useEffect(() => { api.annotations().then(setList).catch((error) => setMessage(error.message)); }, []);
   useEffect(() => {
     if (!targetKey || !list.length || targetApplied.current) return;
@@ -600,14 +601,28 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   currentAnnotationKey.current = activeKey || null;
   useEffect(() => {
     if (!activeKey) { setAnnotation(null); return; }
-    let active = true;
+    const controller = new AbortController();
     setAnnotation(null);
-    api.annotation(activeKey).then((value) => {
-      if (!active) return;
+    setMessage('');
+    api.annotation(activeKey, controller.signal).then((value) => {
+      if (controller.signal.aborted) return;
       setAnnotation(value); setHistory([]); setFuture([]); setSelected(null); setSelectedIgnore(null); setDirty(false); setMessage(''); setAiNotice('');
-    }).catch((error) => { if (active) setMessage(error.message); });
-    return () => { active = false; };
-  }, [activeKey]);
+    }).catch((error) => { if (!controller.signal.aborted) setMessage(error.message); });
+    return () => controller.abort();
+  }, [activeKey, loadAttempt]);
+  const nextImageKey = visible[index + 1]?.key;
+  useEffect(() => {
+    if (!annotation || annotation.key !== activeKey || !nextImageKey) return;
+    const controller = new AbortController();
+    const image = new Image();
+    image.fetchPriority = 'low';
+    const timer = window.setTimeout(() => {
+      void api.annotation(nextImageKey, controller.signal).then(() => {
+        if (!controller.signal.aborted) image.src = `/api/annotations/${nextImageKey}/image`;
+      }).catch(() => {});
+    }, 300);
+    return () => { window.clearTimeout(timer); controller.abort(); image.src = ''; };
+  }, [activeKey, annotation?.key, nextImageKey]);
   const persist = async (reviewed: boolean, changes: Partial<Annotation> = {}) => {
     if (!annotation || saving) return false;
     setSaving(true); setMessage('');
@@ -712,7 +727,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     if (!(await persist(true))) return;
     if (nextKey) {
       const nextIndex = visible.findIndex((item) => item.key === nextKey);
-      if (status === 'pending') setIndex(0);
+      if (status === 'pending' || status === 'started') setIndex(0);
       else if (nextIndex >= 0) setIndex(nextIndex);
     } else setMessage('Revisão concluída: não há mais imagens pendentes nesta fila.');
   };
@@ -767,19 +782,18 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Falha ao importar Parquet.'); }
   };
   return <>
-    <PageTitle eyebrow="Anotação integrada" title="Fila de revisão" description="Pendentes primeiro, com prioridade para as armadilhas FARMLAB. As edições ficam em rascunhos do Studio até a publicação controlada." action={<div className="annotator-actions"><label className="secondary-button file-upload"><UploadCloud />Atualizar Parquet<input type="file" accept=".parquet" onChange={(event) => { void uploadParquet(event.target.files?.[0]); event.target.value = ''; }} /></label><button className="secondary-button ai-suggest-button" onClick={requestSuggestion} disabled={!annotation || annotation.excluded || saving || aiBusy} title="Usa o modelo promovido do FarmGuard para pré-marcar esta foto"><Sparkles />{aiBusy ? 'IA analisando…' : 'Sugerir com IA'}</button><button className="secondary-button" onClick={exclude} disabled={!annotation || saving || aiBusy}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void persist(annotation?.reviewed || false)} disabled={!annotation || saving || aiBusy || !dirty}><Save />{saving ? 'Salvando…' : 'Salvar rascunho'}</button></div>} />
+    <PageTitle eyebrow="Anotação integrada" title="Fila de revisão" description="Fotos para revisar primeiro, com prioridade para as armadilhas FARMLAB. As edições ficam em rascunhos do Studio até a publicação controlada." action={<div className="annotator-actions"><label className="secondary-button file-upload"><UploadCloud />Atualizar Parquet<input type="file" accept=".parquet" onChange={(event) => { void uploadParquet(event.target.files?.[0]); event.target.value = ''; }} /></label><button className="secondary-button ai-suggest-button" onClick={requestSuggestion} disabled={!annotation || annotation.excluded || saving || aiBusy} title="Usa o modelo promovido do FarmGuard para pré-marcar esta foto"><Sparkles />{aiBusy ? 'IA analisando…' : 'Sugerir com IA'}</button><button className="secondary-button" onClick={exclude} disabled={!annotation || saving || aiBusy}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void persist(annotation?.reviewed || false)} disabled={!annotation || saving || aiBusy || !dirty}><Save />{saving ? 'Salvando…' : 'Salvar rascunho'}</button></div>} />
     {message && <div className="error-banner"><CircleAlert />{message}</div>}
     {aiNotice && <div className="inline-success annotation-ai-notice"><Sparkles size={17} />{aiNotice}</div>}
     <section className="annotator-layout">
       <aside className={`annotation-queue panel ${queueExpanded ? '' : 'compact'}`}>
         <div className="queue-head"><div><span className="eyebrow">Fila</span><h2>{visible.length} imagens · {Math.max(0, index + 1)} / {visible.length}</h2></div><button type="button" className="queue-toggle" aria-expanded={queueExpanded} onClick={() => setQueueExpanded((open) => !open)}>{queueExpanded ? 'Ocultar fila' : 'Escolher imagem'}</button></div>
-        <div className="queue-filters-mobile" aria-label="Filtrar imagens por estado">{([
-          ['pending', 'Pendentes'], ['reviewed', 'Revisadas'], ['excluded', 'Excluídas'], ['all', 'Todas'],
-        ] as const).map(([value, label]) => <button key={value} type="button" className={status === value ? 'active' : ''} aria-pressed={status === value} onClick={() => void changeStatus(value)}>{label}<span>{queueCounts[value]}</span></button>)}</div>
-        <select aria-label="Estado das imagens" value={status} onChange={(event) => void changeStatus(event.target.value as typeof status)}><option value="pending">Pendentes</option><option value="reviewed">Revisadas</option><option value="excluded">Excluídas</option><option value="all">Todas</option></select>
+        <div className="queue-filters-mobile" aria-label="Filtrar imagens por estado">{annotationQueueFilters.map(({ value, label }) => <button key={value} type="button" className={status === value ? 'active' : ''} aria-pressed={status === value} onClick={() => void changeStatus(value)}>{label}<span>{queueCounts[value]}</span></button>)}</div>
+        <select aria-label="Estado das imagens" value={status} onChange={(event) => void changeStatus(event.target.value as AnnotationQueueStatus)}>{annotationQueueFilters.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select>
+        {status === 'started' && <p className="queue-filter-hint">Revisão ainda não concluída, com pelo menos uma caixa salva.</p>}
         <input placeholder="Filtrar armadilha ou arquivo" value={filter} onChange={(event) => void changeFilter(event.target.value)} />
         <button className="queue-prioritize" type="button" disabled={!visible[index]?.trap} onClick={() => void prioritizeTrap()}>Priorizar esta armadilha</button>
-        <div className="queue-list">{visible.map((item, itemIndex) => <button key={item.key} className={itemIndex === index ? 'active' : ''} onClick={() => void goTo(itemIndex)}><span className="queue-thumb">{item.cached ? <img src={`/api/annotations/${item.key}/image`} loading="lazy" alt="" /> : <ImageIcon size={20} />}</span><span><strong>{item.trap || 'Sem armadilha'}</strong><small>{item.boxes} boxes · {item.excluded ? 'excluída' : item.reviewed ? 'revisada' : 'pendente'}</small></span></button>)}</div>
+        <div className="queue-list">{visible.map((item, itemIndex) => <button key={item.key} className={itemIndex === index ? 'active' : ''} onClick={() => void goTo(itemIndex)}><AnnotationThumbnail annotationKey={item.key} /><span><strong>{item.trap || 'Sem armadilha'}</strong><small>{item.boxes} boxes · {item.excluded ? 'excluída' : item.reviewed ? 'revisada' : item.boxes > 0 ? 'em andamento' : 'para revisar'}</small></span></button>)}</div>
       </aside>
       <div className="annotation-workspace">
         {aiBusy && <div className="annotation-ai-overlay"><LoaderCircle className="spin" />A IA está analisando a imagem…</div>}
@@ -787,7 +801,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
           <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes · {(annotation.ignore_regions || []).length} áreas incertas{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
           <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} ignoreRegions={annotation.ignore_regions || []} selected={selected} selectedIgnore={selectedIgnore} onSelected={setSelected} onSelectedIgnore={setSelectedIgnore} onChange={updateBoxes} onIgnoreChange={updateIgnoreRegions} onHistoryPoint={historyPoint} />
           <div className="annotation-bottom"><div><span>Seleção</span><strong>{selectedIgnore !== null ? `Área incerta #${selectedIgnore + 1}` : selected !== null ? `Inseto #${selected + 1}` : 'Nenhuma'}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}{selectedIgnore !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateIgnoreRegions((annotation.ignore_regions || []).filter((_, regionIndex) => regionIndex !== selectedIgnore)); setSelectedIgnore(null); }}><Trash2 />Excluir área incerta</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
-        </> : <div className="loading-page">{visible.length ? <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
+        </> : <div className="loading-page">{visible.length ? message ? <button className="secondary-button" onClick={() => setLoadAttempt((value) => value + 1)}><RefreshCw />Tentar carregar novamente</button> : <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
       </div>
     </section>
     {confirmSuggestion && annotation && <div className="modal-backdrop" onMouseDown={() => setConfirmSuggestion(false)}><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-ai-title" aria-describedby="confirm-ai-description" onMouseDown={(event) => event.stopPropagation()}><div className="confirm-modal-icon ai"><Sparkles /></div><h2 id="confirm-ai-title">Substituir boxes pela IA?</h2><p id="confirm-ai-description">Esta imagem tem {annotation.boxes.length} box(es){annotation.reviewed ? ' e está revisada' : ''}. A IA substituirá as marcações atuais, reabrirá a revisão e salvará um rascunho. Você poderá desfazer a substituição.</p><div className="confirm-modal-actions"><button ref={cancelSuggestionRef} type="button" className="secondary-button" onClick={() => setConfirmSuggestion(false)}>Cancelar</button><button type="button" className="primary-button" onClick={() => void suggestWithAi()}><Sparkles />Usar sugestões</button></div></div></div>}

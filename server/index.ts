@@ -30,6 +30,7 @@ import { publicationPlan, publishDrafts } from './publication.js';
 import { suggestBoxes } from './ai-suggestions.js';
 import { datasetImagePath, datasetThumbnailPath, listDatasetImages, moveImage, reapplySplitOverrides } from './dataset-split.js';
 import { predictionThumbnailPath } from './prediction-thumbnails.js';
+import { annotationThumbnailPath } from './annotation-thumbnails.js';
 import { promoteModel } from './model-management.js';
 import { reloadPromotedModel } from './ia-api.js';
 import { CameraInputError, cameraTestImage, cleanupCameraTests, createCameraTest, discardCameraTest } from './camera-test.js';
@@ -193,10 +194,18 @@ app.get('/api/annotations/:key/image', async (request, response, next) => {
   try {
     const annotation = await getAnnotation(request.params.key);
     if (!annotation) return response.status(404).end();
-    response.sendFile(await resolveAnnotationImage(annotation));
+    response.setHeader('Cache-Control', 'private, max-age=60');
+    response.sendFile(await resolveAnnotationImage(annotation), { cacheControl: false });
   } catch (error) {
     next(error);
   }
+});
+
+app.get('/api/annotations/:key/thumbnail', async (request, response, next) => {
+  try {
+    response.setHeader('Cache-Control', 'private, max-age=60');
+    response.sendFile(await annotationThumbnailPath(request.params.key), { cacheControl: false });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/predictions/:group', async (request, response, next) => {

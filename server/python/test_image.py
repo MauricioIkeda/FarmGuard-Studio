@@ -17,12 +17,13 @@ def main():
     parser.add_argument("--confidence", type=float, required=True)
     parser.add_argument("--iou", type=float, required=True)
     parser.add_argument("--imgsz", type=int, default=1280)
+    parser.add_argument("--max-det", type=int, default=1000)
     args = parser.parse_args()
 
     device = 0 if torch.cuda.is_available() else "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"
     result = YOLO(args.model).predict(
         source=args.image, imgsz=args.imgsz, conf=args.confidence,
-        iou=args.iou, max_det=1000, device=device, verbose=False,
+        iou=args.iou, max_det=args.max_det, device=device, verbose=False,
     )[0]
     annotated = result.plot(line_width=2, font_size=12)
     if not cv2.imwrite(args.output, annotated, [cv2.IMWRITE_JPEG_QUALITY, 92]):
