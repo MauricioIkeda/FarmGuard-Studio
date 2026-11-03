@@ -4,6 +4,8 @@ Bancada web local para acompanhar o dataset, comparar experimentos YOLO, inspeci
 
 O Studio é um repositório independente. Por padrão, ele acessa o FarmGuard somente para leitura e grava seus próprios dados em `data/`.
 
+O [documento de persistência para o backend .NET](https://github.com/Lichwyy/FarmGuard/blob/main/docs/PERSISTENCIA_IA_PARA_DOTNET.md) mapeia os arquivos atuais e os requisitos para migrar imagens, revisões, boxes, regiões incertas, datasets, modelos e histórico. Ele descreve uma proposta; o Studio continua usando a persistência local até essa integração ser implementada.
+
 ## O que já está integrado
 
 - panorama do dataset completo (incluindo imagens ainda não revisadas), boxes e armadilhas;
