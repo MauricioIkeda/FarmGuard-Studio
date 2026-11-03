@@ -66,38 +66,33 @@ function safeName(value: unknown, fallback: string) {
   return normalized || fallback;
 }
 
-async function selectedDataset(options: Record<string, unknown>, ignoreRegions: boolean) {
+async function selectedDataset(options: Record<string, unknown>) {
   const key = String(options.dataset || 'unimar');
   const names: Record<string, string> = {
     unimar: 'datasetUnimar', yellow: 'datasetYellow', stickyPi: 'datasetStickyPi',
   };
   const folder = names[key];
   if (!folder) throw new Error('Dataset inválido. Escolha um dos conjuntos catalogados.');
-  if (ignoreRegions && key !== 'unimar') {
-    throw new Error('Áreas incertas são suportadas somente no dataset Unimar.');
-  }
   const yaml = path.join(farmPaths.ia, 'Datasets', folder, 'DatasetYolo', 'dataset.yaml');
   try { await fs.access(yaml); }
   catch { throw new Error(`Dataset ${folder} ainda não foi preparado neste computador.`); }
   return yaml;
 }
 
-async function buildCommand(type: JobType, options: Record<string, unknown>, calibration?: CalibrationContext) {
+export async function buildCommand(type: JobType, options: Record<string, unknown>, calibration?: CalibrationContext) {
   const python = pythonExecutable();
   if (type === 'train') {
-    const ignoreRegions = options.ignoreRegions === true;
-    const args = [path.join(farmPaths.training, ignoreRegions ? 'train_ignore.py' : 'train.py')];
+    const args = [path.join(farmPaths.training, 'train.py')];
     if (options.model) args.push('--model', String(options.model));
-    args.push('--data', await selectedDataset(options, ignoreRegions));
-    args.push('--name', safeName(options.name, `${ignoreRegions ? 'studio-ignore' : 'studio'}-${Date.now()}`));
+    args.push('--data', await selectedDataset(options));
+    args.push('--name', safeName(options.name, `studio-${Date.now()}`));
     return [python, ...args];
   }
   if (type === 'validate') {
-    const ignoreRegions = options.ignoreRegions === true;
-    const args = [path.join(farmPaths.training, ignoreRegions ? 'val_ignore.py' : 'val.py')];
-    if (options.model || ignoreRegions) args.push('--model', String(options.model || path.join(farmPaths.models, 'insect-detector.pt')));
-    args.push('--data', await selectedDataset(options, ignoreRegions));
-    if (ignoreRegions && options.name) args.push('--name', safeName(options.name, `studio-ignore-validation-${Date.now()}`));
+    const args = [path.join(farmPaths.training, 'val.py')];
+    if (options.model) args.push('--model', String(options.model));
+    args.push('--data', await selectedDataset(options));
+    if (options.name) args.push('--name', safeName(options.name, `studio-validation-${Date.now()}`));
     return [python, ...args];
   }
   if (type === 'tune') {

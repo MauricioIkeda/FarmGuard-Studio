@@ -12,6 +12,8 @@ export type AnnotationBox = {
   height: number;
 };
 
+export type IgnoreRegion = AnnotationBox & { kind?: 'unknown' | 'crowd' };
+
 export type Annotation = {
   schema_version: number;
   key: string;
@@ -27,7 +29,7 @@ export type Annotation = {
     metadata?: Record<string, unknown>;
   };
   boxes: AnnotationBox[];
-  ignore_regions?: AnnotationBox[];
+  ignore_regions?: IgnoreRegion[];
   studioDraft?: boolean;
 };
 
@@ -224,9 +226,12 @@ export async function saveDraft(key: string, input: Annotation) {
   }
   const original = await getAnnotation(key);
   if (!original) throw new Error('Imagem não encontrada na fonte de dados.');
+  if ((input.ignore_regions || []).some((region) => region.kind !== undefined && region.kind !== 'unknown' && region.kind !== 'crowd')) {
+    throw new Error('Tipo de área incerta inválido.');
+  }
   const clean: Annotation = {
     ...input,
-    schema_version: input.schema_version || 4,
+    schema_version: Math.max(input.schema_version || 4, 5),
     key,
     image: original.image,
     width: original.width,
@@ -241,6 +246,7 @@ export async function saveDraft(key: string, input: Annotation) {
     ignore_regions: (input.ignore_regions || []).map((region) => ({
       x: Number(region.x), y: Number(region.y),
       width: Number(region.width), height: Number(region.height),
+      kind: region.kind || 'unknown',
     })),
   };
   if ([...clean.boxes, ...(clean.ignore_regions || [])].some((box) =>

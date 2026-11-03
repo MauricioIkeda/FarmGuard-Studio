@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Hand, LoaderCircle, Maximize, Minus, MousePointer2, Pencil, Plus, RefreshCw, Scan } from 'lucide-react';
-import type { Box } from '../types';
+import type { Box, IgnoreRegion, UncertaintyKind } from '../types';
 import { resizeHandleAt, resizeFromHandle, smallestBoxAt, type Point, type ResizeHandle } from '../annotation-geometry';
 
 type Props = {
@@ -8,13 +8,14 @@ type Props = {
   imageWidth: number;
   imageHeight: number;
   boxes: Box[];
-  ignoreRegions: Box[];
+  ignoreRegions: IgnoreRegion[];
+  newIgnoreKind: UncertaintyKind;
   selected: number | null;
   selectedIgnore: number | null;
   onSelected: (index: number | null) => void;
   onSelectedIgnore: (index: number | null) => void;
   onChange: (boxes: Box[]) => void;
-  onIgnoreChange: (regions: Box[]) => void;
+  onIgnoreChange: (regions: IgnoreRegion[]) => void;
   onHistoryPoint: () => void;
 };
 
@@ -30,6 +31,7 @@ export function AnnotationCanvas({
   imageHeight,
   boxes,
   ignoreRegions,
+  newIgnoreKind,
   selected,
   selectedIgnore,
   onSelected,
@@ -149,25 +151,27 @@ export function AnnotationCanvas({
         context.strokeRect(x - size / 2, y - size / 2, size, size);
       }
     };
+    ignoreRegions.forEach((region, index) => {
+      context.fillStyle = 'rgba(168, 100, 240, 0.18)';
+      context.fillRect(region.x, region.y, region.width, region.height);
+      context.setLineDash(region.kind === 'crowd' ? [8 / view.scale, 5 / view.scale] : []);
+      context.strokeStyle = index === selectedIgnore ? '#ffd36e' : '#bd8bff';
+      context.lineWidth = (index === selectedIgnore ? 4 : 2) / view.scale;
+      context.strokeRect(region.x, region.y, region.width, region.height);
+      context.setLineDash([]);
+      if (index === selectedIgnore) drawHandles(region, '#ffd36e');
+    });
     boxes.forEach((box, index) => {
       context.strokeStyle = index === selected ? '#ffbd52' : '#78f0cc';
       context.lineWidth = (index === selected ? 4 : 2) / view.scale;
       context.strokeRect(box.x, box.y, box.width, box.height);
       if (index === selected) drawHandles(box, '#ffbd52');
     });
-    ignoreRegions.forEach((region, index) => {
-      context.fillStyle = 'rgba(244, 83, 83, 0.23)';
-      context.fillRect(region.x, region.y, region.width, region.height);
-      context.strokeStyle = index === selectedIgnore ? '#ffd36e' : '#ff6666';
-      context.lineWidth = (index === selectedIgnore ? 4 : 2) / view.scale;
-      context.strokeRect(region.x, region.y, region.width, region.height);
-      if (index === selectedIgnore) drawHandles(region, '#ffd36e');
-    });
     if (gesture?.type === 'draw') {
       const left = Math.min(gesture.start.x, gesture.current.x);
       const top = Math.min(gesture.start.y, gesture.current.y);
       context.setLineDash([10 / view.scale, 7 / view.scale]);
-      context.strokeStyle = gesture.kind === 'ignore' ? '#ff6666' : '#b9f35a';
+      context.strokeStyle = gesture.kind === 'ignore' ? '#bd8bff' : '#b9f35a';
       context.lineWidth = 3 / view.scale;
       context.strokeRect(left, top, Math.abs(gesture.current.x - gesture.start.x), Math.abs(gesture.current.y - gesture.start.y));
     }
@@ -331,7 +335,7 @@ export function AnnotationCanvas({
         y: Math.max(0, Math.min(imageHeight - gesture.original.height, gesture.original.y + dy)),
       };
     } else {
-      updated[gesture.index] = resizeFromHandle(gesture.original, gesture.handle, dx, dy, imageWidth, imageHeight);
+      updated[gesture.index] = { ...gesture.original, ...resizeFromHandle(gesture.original, gesture.handle, dx, dy, imageWidth, imageHeight) };
     }
     if (updated[gesture.index].x === (gesture.kind === 'ignore' ? ignoreRegions : boxes)[gesture.index].x &&
       updated[gesture.index].y === (gesture.kind === 'ignore' ? ignoreRegions : boxes)[gesture.index].y &&
@@ -369,7 +373,7 @@ export function AnnotationCanvas({
       if (width >= 4 && height >= 4) {
         onHistoryPoint();
         if (gesture.kind === 'ignore') {
-          onIgnoreChange([...ignoreRegions, { x, y, width, height }]);
+          onIgnoreChange([...ignoreRegions, { x, y, width, height, kind: newIgnoreKind }]);
           onSelectedIgnore(ignoreRegions.length); onSelected(null);
         } else {
           onChange([...boxes, { x, y, width, height }]);

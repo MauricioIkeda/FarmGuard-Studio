@@ -40,12 +40,13 @@ import { api } from './api';
 import { annotationMatchesStatus, annotationQueueCounts, annotationQueueFilters, type AnnotationQueueStatus } from './annotation-queue';
 import { mergeJobs } from './job-sync';
 import { AnnotationCanvas } from './components/AnnotationCanvas';
+import { AnnotationEvaluation } from './components/AnnotationEvaluation';
 import { DatasetSplitPage } from './components/DatasetSplitPage';
 import { CalibrationPage } from './components/CalibrationPage';
 import { MetricChart } from './components/MetricChart';
 import { ModelsPage } from './components/ModelsPage';
 import { CameraTestPage } from './components/CameraTestPage';
-import type { Annotation, AnnotationSummary, Job, Overview, PredictionDetections, PublicationChange, Run } from './types';
+import type { Annotation, AnnotationEvaluation as Evaluation, AnnotationSummary, Job, Overview, PredictionDetections, PublicationChange, Run, SuggestionMode, UncertaintyKind } from './types';
 
 type Page = 'overview' | 'experiments' | 'models' | 'calibration' | 'camera' | 'operations' | 'dataset' | 'annotator';
 
@@ -410,7 +411,6 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
   const [trainingModel, setTrainingModel] = useState(data.models[0]?.path || 'yolo11s.pt');
   const [dataset, setDataset] = useState('unimar');
   const [name, setName] = useState('');
-  const [ignoreRegions, setIgnoreRegions] = useState(false);
   const [message, setMessage] = useState('');
   const loadJobs = useCallback(async () => {
     const loaded = await api.jobs();
@@ -432,7 +432,7 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
     setSubmitting(true);
     setMessage('');
     try {
-      const job = await api.createJob(type, { model: type === 'train' ? trainingModel : model, name, dataset, ignoreRegions: (type === 'train' || type === 'validate') && ignoreRegions });
+      const job = await api.createJob(type, { model: type === 'train' ? trainingModel : model, name, dataset });
       setJobs((current) => mergeJobs(current, [job]));
       setSelectedJobId(job.id);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível iniciar.'); }
@@ -461,9 +461,9 @@ function OperationsPage({ data, onRefresh, onOpenAnnotation }: { data: Overview;
           <optgroup label="Checkpoints do FarmGuard">{data.models.map((item) => <option key={item.id} value={item.path}>{item.name} · {size(item.size)}</option>)}</optgroup>
         </select>
         {type === 'train' && <div className="operation-note"><CircleAlert /><span>As bases YOLO11 .pt já vêm pré-treinadas; cada treino cria uma nova execução para o dataset escolhido. No primeiro uso, o peso pode ser baixado. Medium, Large e XLarge podem exceder os 6 GB de VRAM desta máquina com o lote e a resolução atuais.</span></div>}</>}
-        {(type === 'train' || type === 'validate') && <><label htmlFor="training-dataset">Dataset</label><select id="training-dataset" value={dataset} disabled={busy} onChange={(event) => { setDataset(event.target.value); if (event.target.value !== 'unimar') setIgnoreRegions(false); }}><option value="unimar">Unimar · fotos da faculdade</option><option value="yellow">Yellow · armadilhas amarelas (externo)</option><option value="stickyPi">Sticky Pi · armadilhas adesivas (externo)</option></select></>}
-        {(type === 'train' || type === 'predict' || (type === 'validate' && ignoreRegions)) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></>}
-        {(type === 'train' || type === 'validate') && <><label className="publication-rebuild-option"><input type="checkbox" checked={ignoreRegions} disabled={busy || dataset !== 'unimar'} onChange={(event) => setIgnoreRegions(event.target.checked)} /><span>Considerar áreas incertas (experimental)<small>Disponível somente para o Unimar. Usa {type === 'train' ? 'train_ignore.py' : 'val_ignore.py'}; as áreas precisam estar publicadas e o YOLO atualizado.</small></span></label>{ignoreRegions && <div className="operation-note"><CircleAlert /><span>O treino com ignore mantém a aumentação padrão e transforma a máscara junto com a imagem. Requer Ultralytics 8.4.161 e não promove o modelo automaticamente.</span></div>}</>}
+        {(type === 'train' || type === 'validate') && <><label htmlFor="training-dataset">Dataset</label><select id="training-dataset" value={dataset} disabled={busy} onChange={(event) => setDataset(event.target.value)}><option value="unimar">Unimar · fotos da faculdade</option><option value="yellow">Yellow · armadilhas amarelas (externo)</option><option value="stickyPi">Sticky Pi · armadilhas adesivas (externo)</option></select></>}
+        {['train', 'predict', 'validate'].includes(type) && <><label htmlFor="name">Nome da execução (opcional)</label><input id="name" placeholder="Gerado automaticamente se ficar vazio" value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></>}
+        {(type === 'train' || type === 'validate') && <div className="operation-note"><ShieldCheck /><span>{dataset === 'unimar' ? 'As áreas incertas são respeitadas automaticamente. Insetos confirmados dentro delas continuam válidos. Publique as anotações e atualize o YOLO antes de executar.' : 'O pré-treino externo usa as anotações disponíveis no dataset. A comparação final deve usar o Unimar, com suas áreas incertas.'}</span></div>}
         {type === 'tune' && <div className="operation-note"><SlidersHorizontal /><span>O Studio testa 9.801 combinações de confiança e NMS IoU, em passos de 0,01, nas imagens de validação Unimar. O melhor ajuste fica salvo no catálogo deste peso; o modelo principal não muda até ser promovido novamente.</span></div>}
         {type === 'predict' && <div className="operation-note"><ImageIcon /><span>O modelo selecionado gera imagens com boxes para a <strong>validação YOLO atual</strong>, usando sua calibração salva quando existir; caso contrário, confiança 0,20 e NMS IoU 0,40. O lote aparecerá em Experimentos.</span></div>}
         <div className="operation-note"><Database /><span>{type === 'drive-datasets' ? 'Espelha a pasta Datasets inteira no Drive, com Yellow, Sticky Pi e Unimar. Arquivos remotos substituídos ou removidos ficam em Datasets-history para recuperação.' : dataset === 'unimar' || !['train', 'validate'].includes(type) ? <>Dataset Unimar atual: <strong>{data.dataset.reviewed} imagens</strong> e <strong>{number.format(data.dataset.boxes)} boxes</strong>.</> : 'Dataset externo selecionado: use-o para pré-treino; compare o modelo final nas fotos Unimar antes de promovê-lo.'}</span></div>
@@ -557,12 +557,15 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedIgnore, setSelectedIgnore] = useState<number | null>(null);
+  const [newIgnoreKind, setNewIgnoreKind] = useState<UncertaintyKind>('unknown');
+  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   type Markings = Pick<Annotation, 'boxes' | 'ignore_regions'>;
   const [history, setHistory] = useState<Markings[]>([]);
   const [future, setFuture] = useState<Markings[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiMode, setAiMode] = useState<SuggestionMode>('standard');
   const [confirmSuggestion, setConfirmSuggestion] = useState(false);
   const [aiNotice, setAiNotice] = useState('');
   const [confirmExclude, setConfirmExclude] = useState(false);
@@ -640,21 +643,24 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     } finally { setSaving(false); }
   };
   const goTo = async (next: number) => {
-    if (next < 0 || next >= visible.length || next === index) return;
+    if (aiBusy || next < 0 || next >= visible.length || next === index) return;
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
     setIndex(next);
     if (window.matchMedia('(max-width: 570px)').matches) setQueueExpanded(false);
   };
   const changeStatus = async (next: typeof status) => {
+    if (aiBusy) return;
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
     setStatus(next); setIndex(0);
     if (window.matchMedia('(max-width: 570px)').matches) setQueueExpanded(true);
   };
   const changeFilter = async (next: string) => {
+    if (aiBusy) return;
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
     setFilter(next); setIndex(0);
   };
   const prioritizeTrap = async () => {
+    if (aiBusy) return;
     const current = visible[index];
     if (!current?.trap) return;
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
@@ -694,7 +700,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
         if (event.key === 'Escape' && !saving) setConfirmExclude(false);
         return;
       }
-      if (!annotation) return;
+      if (!annotation || aiBusy || evaluation) return;
       const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
@@ -749,7 +755,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     setConfirmSuggestion(false);
     setAiNotice(''); setMessage(''); setAiBusy(true);
     try {
-      const suggestion = await api.suggestAnnotation(current.key);
+      const suggestion = await api.suggestAnnotation(current.key, aiMode);
       if (currentAnnotationKey.current !== current.key) return;
       historyPoint();
       setAnnotation({ ...current, boxes: suggestion.boxes, reviewed: false });
@@ -760,7 +766,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
         if (allIndex >= 0) setIndex(allIndex);
       }
       if (await persist(false, { boxes: suggestion.boxes })) {
-        setAiNotice(`IA sugeriu ${suggestion.boxes.length} box(es) com ${suggestion.model}. Revise as marcações antes de concluir.`);
+        setAiNotice(`IA sugeriu ${suggestion.boxes.length} box(es) com ${suggestion.model}, usando análise ${suggestion.mode === 'enhanced' ? 'reforçada' : 'padrão'}. Revise as marcações antes de concluir.`);
       }
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Falha ao analisar a imagem com IA.');
@@ -771,8 +777,25 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
     if (annotation.boxes.length || annotation.reviewed) setConfirmSuggestion(true);
     else void suggestWithAi();
   };
+  const evaluateWithAi = async () => {
+    if (!annotation || !annotation.reviewed || annotation.excluded || dirty || aiBusy || saving) return;
+    const key = annotation.key;
+    setAiBusy(true); setMessage('');
+    try {
+      const result = await api.evaluateAnnotation(key, aiMode);
+      if (currentAnnotationKey.current === key) setEvaluation(result);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'Não foi possível conferir a IA.'); }
+    finally { setAiBusy(false); }
+  };
+  const changeIgnoreKind = (kind: UncertaintyKind) => {
+    setNewIgnoreKind(kind);
+    if (annotation && selectedIgnore !== null) {
+      historyPoint();
+      updateIgnoreRegions((annotation.ignore_regions || []).map((region, i) => i === selectedIgnore ? { ...region, kind } : region));
+    }
+  };
   const uploadParquet = async (file?: File) => {
-    if (!file) return;
+    if (!file || aiBusy) return;
     if (dirty && !(await persist(annotation?.reviewed || false))) return;
     try {
       const result = await api.uploadParquet(file);
@@ -783,6 +806,7 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
   };
   return <>
     <PageTitle eyebrow="Anotação integrada" title="Fila de revisão" description="Fotos para revisar primeiro, com prioridade para as armadilhas FARMLAB. As edições ficam em rascunhos do Studio até a publicação controlada." action={<div className="annotator-actions"><label className="secondary-button file-upload"><UploadCloud />Atualizar Parquet<input type="file" accept=".parquet" onChange={(event) => { void uploadParquet(event.target.files?.[0]); event.target.value = ''; }} /></label><button className="secondary-button ai-suggest-button" onClick={requestSuggestion} disabled={!annotation || annotation.excluded || saving || aiBusy} title="Usa o modelo promovido do FarmGuard para pré-marcar esta foto"><Sparkles />{aiBusy ? 'IA analisando…' : 'Sugerir com IA'}</button><button className="secondary-button" onClick={exclude} disabled={!annotation || saving || aiBusy}><Trash2 />{annotation?.excluded ? 'Restaurar imagem' : 'Excluir imagem'}</button><button className="primary-button" onClick={() => void persist(annotation?.reviewed || false)} disabled={!annotation || saving || aiBusy || !dirty}><Save />{saving ? 'Salvando…' : 'Salvar rascunho'}</button></div>} />
+    <div className="annotation-ai-options"><label htmlFor="annotation-ai-mode">Análise da IA<select id="annotation-ai-mode" value={aiMode} disabled={aiBusy || saving || confirmSuggestion} onChange={(event) => setAiMode(event.target.value as SuggestionMode)}><option value="standard">Análise padrão</option><option value="enhanced">Análise reforçada · experimental</option></select></label><p>{aiMode === 'enhanced' ? 'Usa o perfil reforçado do modelo principal, com espelhamento e variações de escala. Pode levar alguns segundos a mais. Revise as caixas sugeridas.' : 'Usa a análise atual do modelo principal para sugerir as caixas.'}</p><button className="secondary-button" onClick={() => void evaluateWithAi()} disabled={!annotation?.reviewed || annotation.excluded || dirty || saving || aiBusy} title={dirty ? 'Salve as alterações antes de conferir.' : !annotation?.reviewed ? 'Conclua a revisão para usar as anotações como referência.' : 'Compara a IA com a referência salva, sem substituir suas caixas.'}><Gauge />Conferir IA</button></div>
     {message && <div className="error-banner"><CircleAlert />{message}</div>}
     {aiNotice && <div className="inline-success annotation-ai-notice"><Sparkles size={17} />{aiNotice}</div>}
     <section className="annotator-layout">
@@ -799,12 +823,14 @@ function AnnotatorPage({ onSaved, targetKey }: { onSaved: () => Promise<void>; t
         {aiBusy && <div className="annotation-ai-overlay"><LoaderCircle className="spin" />A IA está analisando a imagem…</div>}
         {annotation ? <>
           <div className="annotation-toolbar"><div><StatusPill tone={annotation.studioDraft ? 'warning' : 'neutral'}>{annotation.studioDraft ? 'Rascunho do Studio' : annotation.reviewed ? 'Revisada' : 'Pendente'}</StatusPill><strong>{annotation.source?.metadata?.trap_code as string || annotation.image}</strong><span>{annotation.width} × {annotation.height} · {annotation.boxes.length} boxes · {(annotation.ignore_regions || []).length} áreas incertas{dirty ? ' · alterações não salvas' : ''}</span></div><div><button className="icon-button" aria-label="Desfazer" disabled={!history.length} onClick={undo}><Undo2 /></button><button className="icon-button" aria-label="Refazer" disabled={!future.length} onClick={redo}><Redo2 /></button><button className="icon-button" aria-label="Anterior" disabled={index === 0} onClick={() => void goTo(index - 1)}><ChevronLeft /></button><button className="icon-button" aria-label="Próxima" disabled={index >= visible.length - 1} onClick={() => void goTo(index + 1)}><ChevronRight /></button></div></div>
-          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} ignoreRegions={annotation.ignore_regions || []} selected={selected} selectedIgnore={selectedIgnore} onSelected={setSelected} onSelectedIgnore={setSelectedIgnore} onChange={updateBoxes} onIgnoreChange={updateIgnoreRegions} onHistoryPoint={historyPoint} />
+          <div className="uncertainty-options"><label>{selectedIgnore !== null ? `Tipo da área #${selectedIgnore + 1}` : 'Tipo da próxima área incerta'}<select aria-label="Tipo de área incerta" value={selectedIgnore !== null ? annotation.ignore_regions?.[selectedIgnore]?.kind || 'unknown' : newIgnoreKind} onChange={(event) => changeIgnoreKind(event.target.value as UncertaintyKind)}><option value="unknown">Indefinida · não sei se há insetos</option><option value="crowd">Aglomerado · indivíduos não delimitáveis</option></select></label><p><span className="annotation-legend-insect">Verde: inseto individual.</span> <span className="annotation-legend-region">Roxo: área incerta; tracejado: aglomerado.</span> Insetos identificáveis podem ser marcados dentro dela.{Boolean(annotation.ignore_regions?.length) && <strong> Contagem parcial: as áreas incertas não somam insetos.</strong>}</p></div>
+          <AnnotationCanvas imageUrl={`/api/annotations/${annotation.key}/image`} imageWidth={annotation.width} imageHeight={annotation.height} boxes={annotation.boxes} ignoreRegions={annotation.ignore_regions || []} newIgnoreKind={selectedIgnore !== null ? annotation.ignore_regions?.[selectedIgnore]?.kind || 'unknown' : newIgnoreKind} selected={selected} selectedIgnore={selectedIgnore} onSelected={setSelected} onSelectedIgnore={setSelectedIgnore} onChange={updateBoxes} onIgnoreChange={updateIgnoreRegions} onHistoryPoint={historyPoint} />
           <div className="annotation-bottom"><div><span>Seleção</span><strong>{selectedIgnore !== null ? `Área incerta #${selectedIgnore + 1}` : selected !== null ? `Inseto #${selected + 1}` : 'Nenhuma'}</strong></div>{selected !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateBoxes(annotation.boxes.filter((_, boxIndex) => boxIndex !== selected)); setSelected(null); }}><Trash2 />Excluir box</button>}{selectedIgnore !== null && <button className="secondary-button danger" onClick={() => { historyPoint(); updateIgnoreRegions((annotation.ignore_regions || []).filter((_, regionIndex) => regionIndex !== selectedIgnore)); setSelectedIgnore(null); }}><Trash2 />Excluir área incerta</button>}<button className="primary-button" disabled={saving} onClick={() => void finish()}><Check />Concluir + próxima pendente</button></div>
         </> : <div className="loading-page">{visible.length ? message ? <button className="secondary-button" onClick={() => setLoadAttempt((value) => value + 1)}><RefreshCw />Tentar carregar novamente</button> : <><LoaderCircle className="spin" />Carregando imagem…</> : 'Nenhuma imagem neste filtro. Atualize o Parquet ou escolha outro filtro.'}</div>}
       </div>
     </section>
-    {confirmSuggestion && annotation && <div className="modal-backdrop" onMouseDown={() => setConfirmSuggestion(false)}><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-ai-title" aria-describedby="confirm-ai-description" onMouseDown={(event) => event.stopPropagation()}><div className="confirm-modal-icon ai"><Sparkles /></div><h2 id="confirm-ai-title">Substituir boxes pela IA?</h2><p id="confirm-ai-description">Esta imagem tem {annotation.boxes.length} box(es){annotation.reviewed ? ' e está revisada' : ''}. A IA substituirá as marcações atuais, reabrirá a revisão e salvará um rascunho. Você poderá desfazer a substituição.</p><div className="confirm-modal-actions"><button ref={cancelSuggestionRef} type="button" className="secondary-button" onClick={() => setConfirmSuggestion(false)}>Cancelar</button><button type="button" className="primary-button" onClick={() => void suggestWithAi()}><Sparkles />Usar sugestões</button></div></div></div>}
+    {evaluation && <AnnotationEvaluation result={evaluation} onClose={() => setEvaluation(null)} />}
+    {confirmSuggestion && annotation && <div className="modal-backdrop" onMouseDown={() => setConfirmSuggestion(false)}><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-ai-title" aria-describedby="confirm-ai-description" onMouseDown={(event) => event.stopPropagation()}><div className="confirm-modal-icon ai"><Sparkles /></div><h2 id="confirm-ai-title">Substituir boxes pela IA?</h2><p id="confirm-ai-description">Esta imagem tem {annotation.boxes.length} box(es){annotation.reviewed ? ' e está revisada' : ''}. A análise {aiMode === 'enhanced' ? 'reforçada' : 'padrão'} substituirá as marcações atuais, reabrirá a revisão e salvará um rascunho. Você poderá desfazer a substituição.</p><div className="confirm-modal-actions"><button ref={cancelSuggestionRef} type="button" className="secondary-button" onClick={() => setConfirmSuggestion(false)}>Cancelar</button><button type="button" className="primary-button" onClick={() => void suggestWithAi()}><Sparkles />Usar sugestões</button></div></div></div>}
     {confirmExclude && annotation && <div className="modal-backdrop" onMouseDown={() => { if (!saving) setConfirmExclude(false); }}><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-exclude-title" aria-describedby="confirm-exclude-description" onMouseDown={(event) => event.stopPropagation()}><div className="confirm-modal-icon"><Trash2 /></div><h2 id="confirm-exclude-title">Excluir esta imagem?</h2><p id="confirm-exclude-description">Ela ficará no filtro Excluídas e não entrará no DatasetYolo após a publicação. {annotation.boxes.length ? `${annotation.boxes.length} box(es) serão preservadas no rascunho para uma possível restauração.` : 'Você poderá restaurá-la depois.'}</p>{message && <div className="inline-error"><CircleAlert />{message}</div>}<div className="confirm-modal-actions"><button ref={cancelExcludeRef} type="button" className="secondary-button" disabled={saving} onClick={() => setConfirmExclude(false)}>Cancelar</button><button type="button" className="danger-button" disabled={saving} onClick={() => void confirmExclusion()}><Trash2 />{saving ? 'Salvando…' : 'Excluir imagem e salvar'}</button></div></div></div>}
   </>;
 }

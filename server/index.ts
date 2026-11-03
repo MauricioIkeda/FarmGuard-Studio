@@ -27,7 +27,8 @@ import {
 import { authStatus, login, logout, requireAuth } from './auth.js';
 import { driveStatus } from './drive.js';
 import { publicationPlan, publishDrafts } from './publication.js';
-import { suggestBoxes } from './ai-suggestions.js';
+import { suggestBoxes, suggestionMode, SuggestionInputError } from './ai-suggestions.js';
+import { evaluateAnnotation, EvaluationInputError } from './annotation-evaluation.js';
 import { datasetImagePath, datasetThumbnailPath, listDatasetImages, moveImage, reapplySplitOverrides } from './dataset-split.js';
 import { predictionThumbnailPath } from './prediction-thumbnails.js';
 import { annotationThumbnailPath } from './annotation-thumbnails.js';
@@ -186,8 +187,19 @@ app.put('/api/annotations/:key', async (request, response, next) => {
 });
 
 app.post('/api/annotations/:key/suggest', async (request, response, next) => {
-  try { response.json(await suggestBoxes(request.params.key)); }
-  catch (error) { next(error); }
+  try { response.json(await suggestBoxes(request.params.key, suggestionMode(request.body?.mode))); }
+  catch (error) { if (error instanceof SuggestionInputError) response.status(400).json({ error: error.message }); else next(error); }
+});
+
+app.post('/api/annotations/:key/evaluate', async (request, response, next) => {
+  try {
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(await evaluateAnnotation(request.params.key, suggestionMode(request.body?.mode)));
+  } catch (error) {
+    if (error instanceof EvaluationInputError) response.status(error.status).json({ error: error.message });
+    else if (error instanceof SuggestionInputError) response.status(400).json({ error: error.message });
+    else next(error);
+  }
 });
 
 app.get('/api/annotations/:key/image', async (request, response, next) => {

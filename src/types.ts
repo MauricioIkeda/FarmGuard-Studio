@@ -114,6 +114,28 @@ export type DatasetImage = {
 };
 
 export type Box = { x: number; y: number; width: number; height: number };
+export type UncertaintyKind = 'unknown' | 'crowd';
+export type IgnoreRegion = Box & { kind?: UncertaintyKind };
+export type SuggestionMode = 'standard' | 'enhanced';
+
+export type AnnotationEvaluation = {
+  key: string;
+  model: string;
+  mode: SuggestionMode;
+  referenceHash: string;
+  annotation: Annotation;
+  inference: { modelSha256: string; imgsz: number; confidence: number; nmsIou: number; maxDet: number };
+  protocol: string;
+  matchIou: number;
+  ignoreCoverage: number;
+  predictions: Array<Box & { confidence: number; status: 'tp' | 'fp' | 'ignored'; truthIndex: number | null }>;
+  missed: number[];
+  counts: { tp: number; fp: number; fn: number; ignored: number; reference: number; detected: number };
+  precision: number | null;
+  recall: number | null;
+  uncertainFraction: number;
+  countIsPartial: boolean;
+};
 
 export type Annotation = {
   schema_version: number;
@@ -126,7 +148,7 @@ export type Annotation = {
   class: string;
   source?: { type?: string; url?: string; metadata?: Record<string, unknown> };
   boxes: Box[];
-  ignore_regions?: Box[];
+  ignore_regions?: IgnoreRegion[];
   studioDraft?: boolean;
 };
 

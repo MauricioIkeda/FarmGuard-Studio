@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationSummary, AuthStatus, CameraTest, DatasetImage, Job, Overview, PredictionDetections, PublicationChange } from './types';
+import type { Annotation, AnnotationEvaluation, AnnotationSummary, AuthStatus, CameraTest, DatasetImage, Job, Overview, PredictionDetections, PublicationChange, SuggestionMode } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -59,11 +59,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(annotation),
     }),
-  suggestAnnotation: (key: string) =>
-    request<{ key: string; model: string; boxes: Annotation['boxes'] }>(`/api/annotations/${encodeURIComponent(key)}/suggest`, {
-      method: 'POST',
+  suggestAnnotation: (key: string, mode: SuggestionMode = 'standard') =>
+    request<{ key: string; model: string; boxes: Annotation['boxes']; mode: SuggestionMode }>(`/api/annotations/${encodeURIComponent(key)}/suggest`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }),
     }),
   jobs: () => request<Job[]>('/api/jobs'),
+  evaluateAnnotation: (key: string, mode: SuggestionMode) =>
+    request<AnnotationEvaluation>(`/api/annotations/${encodeURIComponent(key)}/evaluate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }),
+    }),
   createJob: (type: Job['type'], options: Record<string, unknown>) =>
     request<Job>('/api/jobs', {
       method: 'POST',
