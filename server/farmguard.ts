@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, farmPaths } from './config.js';
@@ -13,6 +14,9 @@ export type AnnotationBox = {
 };
 
 export type IgnoreRegion = AnnotationBox & { kind?: 'unknown' | 'crowd' };
+export class DraftInputError extends Error {
+  constructor(message: string, readonly status = 400) { super(message); }
+}
 
 export type Annotation = {
   schema_version: number;
@@ -222,12 +226,12 @@ export async function getAnnotation(key: string): Promise<Annotation | null> {
 
 export async function saveDraft(key: string, input: Annotation) {
   if (!/^[a-zA-Z0-9_-]+$/.test(key) || key !== input.key) {
-    throw new Error('Identificador de anotacao invalido.');
+    throw new DraftInputError('Identificador de anotação inválido.');
   }
   const original = await getAnnotation(key);
-  if (!original) throw new Error('Imagem não encontrada na fonte de dados.');
+  if (!original) throw new DraftInputError('Imagem não encontrada na fonte de dados.', 404);
   if ((input.ignore_regions || []).some((region) => region.kind !== undefined && region.kind !== 'unknown' && region.kind !== 'crowd')) {
-    throw new Error('Tipo de área incerta inválido.');
+    throw new DraftInputError('Tipo de área incerta inválido.');
   }
   const clean: Annotation = {
     ...input,
@@ -253,13 +257,17 @@ export async function saveDraft(key: string, input: Annotation) {
     ![box.x, box.y, box.width, box.height].every(Number.isFinite) ||
     box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 ||
     box.x + box.width > clean.width || box.y + box.height > clean.height)) {
-    throw new Error('Box ou região incerta fora dos limites da imagem.');
+    throw new DraftInputError('Box ou região incerta fora dos limites da imagem.');
   }
   delete clean.studioDraft;
   const draftDir = path.join(config.dataRoot, 'annotation-drafts');
   await fs.mkdir(draftDir, { recursive: true });
   const target = path.join(draftDir, `${key}.json`);
-  await fs.writeFile(target, `${JSON.stringify(clean, null, 2)}\n`, 'utf8');
+  const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(clean, null, 2)}\n`, 'utf8');
+    await fs.rename(temporary, target);
+  } finally { await fs.rm(temporary, { force: true }); }
   void backupDraft(target).catch((error) =>
     console.error('Falha ao enviar rascunho ao Drive:', error),
   );

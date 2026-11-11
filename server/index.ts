@@ -13,8 +13,9 @@ import {
   resolvePredictionImage,
   resolvePredictionOriginal,
   saveDraft,
+  DraftInputError,
 } from './farmguard.js';
-import { importSource } from './annotation-source.js';
+import { importSource, SourceInputError } from './annotation-source.js';
 import {
   cancelJob,
   createJob,
@@ -22,17 +23,21 @@ import {
   jobEvents,
   listJobs,
   loadPersistedJobs,
+  withIdleJobs,
+  JobBusyError,
+  JobInputError,
+  JobsDisabledError,
   type JobType,
 } from './jobs.js';
 import { authStatus, login, logout, requireAuth } from './auth.js';
 import { driveStatus } from './drive.js';
-import { publicationPlan, publishDrafts } from './publication.js';
+import { publicationPlan, publishDrafts, PublicationInputError } from './publication.js';
 import { suggestBoxes, suggestionMode, SuggestionInputError } from './ai-suggestions.js';
 import { evaluateAnnotation, EvaluationInputError } from './annotation-evaluation.js';
 import { datasetImagePath, datasetThumbnailPath, listDatasetImages, moveImage, reapplySplitOverrides } from './dataset-split.js';
 import { predictionThumbnailPath } from './prediction-thumbnails.js';
 import { annotationThumbnailPath } from './annotation-thumbnails.js';
-import { promoteModel } from './model-management.js';
+import { ModelInputError, promoteModel } from './model-management.js';
 import { reloadPromotedModel } from './ia-api.js';
 import { CameraInputError, cameraTestImage, cleanupCameraTests, createCameraTest, discardCameraTest } from './camera-test.js';
 import { CalibrationInputError, calibrationPreviewImage, cleanupCalibrationPreviews, createCalibrationPreview } from './calibration-preview.js';
@@ -74,20 +79,20 @@ app.get('/api/overview', async (_request, response, next) => {
 });
 
 app.post('/api/models/promote', async (request, response, next) => {
-  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
-    return response.status(409).json({ error: 'Aguarde a operação atual antes de promover um modelo.' });
-  }
   if (request.body?.confirmation !== 'PROMOVER') {
     return response.status(400).json({ error: 'Confirme a promoção explicitamente.' });
   }
   try {
-    const promoted = await promoteModel(String(request.body?.modelId || ''));
-    try {
-      await reloadPromotedModel();
-      response.json(promoted);
-    } catch (error) {
-      response.json({ ...promoted, iaApiWarning: `Modelo promovido, mas a IA API ainda não foi atualizada: ${(error as Error).message}` });
-    }
+    const result = await withIdleJobs(async () => {
+      const promoted = await promoteModel(String(request.body?.modelId || ''));
+      try {
+        await reloadPromotedModel();
+        return promoted;
+      } catch (error) {
+        return { ...promoted, iaApiWarning: `Modelo promovido, mas a IA API ainda não foi atualizada: ${(error as Error).message}` };
+      }
+    });
+    response.json(result);
   }
   catch (error) { next(error); }
 });
@@ -141,18 +146,12 @@ app.get('/api/dataset/thumbnail/:split/:image', async (request, response, next) 
 });
 
 app.post('/api/dataset/split', async (request, response, next) => {
-  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
-    return response.status(409).json({ error: 'Aguarde a operação atual terminar antes de alterar o dataset.' });
-  }
-  try { response.json(await moveImage(request.body?.image, request.body?.split)); }
+  try { response.json(await withIdleJobs(() => moveImage(request.body?.image, request.body?.split))); }
   catch (error) { next(error); }
 });
 
 app.post('/api/dataset/split/reapply', async (_request, response, next) => {
-  if (listJobs().some((job) => job.status === 'running' || job.status === 'queued')) {
-    return response.status(409).json({ error: 'Aguarde a operação atual terminar antes de alterar o dataset.' });
-  }
-  try { response.json(await reapplySplitOverrides()); } catch (error) { next(error); }
+  try { response.json(await withIdleJobs(reapplySplitOverrides)); } catch (error) { next(error); }
 });
 
 app.get('/api/annotations', async (_request, response, next) => {
@@ -164,7 +163,7 @@ app.get('/api/annotations', async (_request, response, next) => {
 });
 
 app.post('/api/sources/parquet', express.raw({ type: 'application/octet-stream', limit: '15mb' }), async (request, response, next) => {
-  try { response.json(await importSource(request.body as Buffer)); }
+  try { response.json(await withIdleJobs(() => importSource(request.body as Buffer))); }
   catch (error) { next(error); }
 });
 
@@ -277,14 +276,23 @@ app.post('/api/jobs', async (request, response, next) => {
 app.post('/api/jobs/:id/cancel', (request, response) => {
   response.status(cancelJob(request.params.id) ? 200 : 409).json({ ok: true });
 });
-app.get('/api/jobs-stream', (request, response) => {
+app.get('/api/jobs-stream', (_request, response) => {
   response.setHeader('Content-Type', 'text/event-stream');
   response.setHeader('Cache-Control', 'no-cache');
   response.setHeader('Connection', 'keep-alive');
   response.flushHeaders();
-  const listener = (job: unknown) => response.write(`data: ${JSON.stringify(job)}\n\n`);
+  const writeEvent = (event: string) => {
+    if (response.writableLength > 1024 * 1024) response.destroy();
+    else response.write(event);
+  };
+  writeEvent(': connected\n\n');
+  const heartbeat = setInterval(() => writeEvent(': heartbeat\n\n'), 15_000).unref();
+  const listener = (job: unknown) => writeEvent(`data: ${JSON.stringify(job)}\n\n`);
   jobEvents.on('update', listener);
-  request.on('close', () => jobEvents.off('update', listener));
+  response.on('close', () => {
+    clearInterval(heartbeat);
+    jobEvents.off('update', listener);
+  });
 });
 
 app.get('/api/publication/plan', async (_request, response, next) => {
@@ -294,17 +302,37 @@ app.get('/api/publication/plan', async (_request, response, next) => {
 app.post('/api/publication/publish', async (request, response, next) => {
   try {
     const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String) : [];
-    const publication = await publishDrafts(keys);
+    const publication = await withIdleJobs(() => publishDrafts(keys));
     const rebuild = request.body?.rebuild === true;
-    const job = rebuild ? await createJob('dataset', {}) : null;
-    response.json({ ...publication, job });
+    try {
+      const job = rebuild ? await createJob('dataset', {}) : null;
+      response.json({ ...publication, job });
+    } catch (error) {
+      const rebuildError = error instanceof JobsDisabledError || error instanceof JobBusyError
+        ? error.message : 'Não foi possível enfileirar a reconstrução do dataset.';
+      console.error(error);
+      response.json({ ...publication, job: null, rebuildError });
+    }
   } catch (error) { next(error); }
 });
 
 app.get('/api/drive/status', async (_request, response) => response.json(await driveStatus()));
 
-app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+app.use('/api', (_request, response) => response.status(404).json({ error: 'Operação não encontrada.' }));
+
+app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
+  if (response.headersSent) return next(error);
   const message = error instanceof Error ? error.message : 'Erro inesperado.';
+  if (error instanceof JobBusyError) return response.status(409).json({ error: message });
+  if (error instanceof JobsDisabledError) return response.status(403).json({ error: message });
+  if (error instanceof DraftInputError || error instanceof ModelInputError) return response.status(error.status).json({ error: message });
+  if (error instanceof JobInputError || error instanceof PublicationInputError || error instanceof SourceInputError) {
+    return response.status(400).json({ error: message });
+  }
+  const failure = error as NodeJS.ErrnoException & { status?: number };
+  if (failure?.status === 413) return response.status(413).json({ error: 'Corpo da solicitação excede o limite permitido.' });
+  if (failure?.status === 400) return response.status(400).json({ error: 'Corpo da solicitação inválido.' });
+  if (failure?.code === 'ENOENT') return response.status(404).json({ error: 'Arquivo necessário não encontrado.' });
   console.error(error);
   response.status(500).json({ error: message });
 });

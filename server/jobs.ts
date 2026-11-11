@@ -26,8 +26,12 @@ export type Job = {
 
 const jobs = new Map<string, Job>();
 const processes = new Map<string, ChildProcessWithoutNullStreams>();
+const pendingWrites = new Map<string, Promise<void>>();
 let creatingJob = false;
 export const jobEvents = new EventEmitter();
+export class JobInputError extends Error {}
+export class JobBusyError extends Error {}
+export class JobsDisabledError extends Error {}
 
 export async function loadPersistedJobs() {
   const root = path.join(config.dataRoot, 'jobs');
@@ -72,10 +76,10 @@ async function selectedDataset(options: Record<string, unknown>) {
     unimar: 'datasetUnimar', yellow: 'datasetYellow', stickyPi: 'datasetStickyPi',
   };
   const folder = names[key];
-  if (!folder) throw new Error('Dataset inválido. Escolha um dos conjuntos catalogados.');
+  if (!Object.hasOwn(names, key)) throw new JobInputError('Dataset inválido. Escolha um dos conjuntos catalogados.');
   const yaml = path.join(farmPaths.ia, 'Datasets', folder, 'DatasetYolo', 'dataset.yaml');
   try { await fs.access(yaml); }
-  catch { throw new Error(`Dataset ${folder} ainda não foi preparado neste computador.`); }
+  catch { throw new JobInputError(`Dataset ${folder} ainda não foi preparado neste computador.`); }
   return yaml;
 }
 
@@ -103,7 +107,7 @@ export async function buildCommand(type: JobType, options: Record<string, unknow
       const iou = options.manualIou;
       if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0.01 || confidence > 0.99 ||
           typeof iou !== 'number' || !Number.isFinite(iou) || iou < 0.01 || iou > 0.99) {
-        throw new Error('Confiança e NMS IoU manuais devem estar entre 0,01 e 0,99.');
+        throw new JobInputError('Confiança e NMS IoU manuais devem estar entre 0,01 e 0,99.');
       }
       calibration.mode = 'manual';
       return [python, path.join(studioRoot, 'server', 'python', 'manual_calibration.py'),
@@ -127,7 +131,7 @@ export async function buildCommand(type: JobType, options: Record<string, unknow
     const name = safeName(options.name, `studio-predict-${Date.now()}`);
     try {
       await fs.access(path.join(farmPaths.predictions, name));
-      throw new Error(`Já existe uma galeria chamada ${name}. Escolha outro nome ou deixe o campo vazio.`);
+      throw new JobBusyError(`Já existe uma galeria chamada ${name}. Escolha outro nome ou deixe o campo vazio.`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -138,7 +142,7 @@ export async function buildCommand(type: JobType, options: Record<string, unknow
     return [python, path.join(farmPaths.ia, 'DatasetCreator', 'dataset.py')];
   }
   const drive = await discoverDrive();
-  if (!drive) throw new Error('Google Drive nao configurado.');
+  if (!drive) throw new JobInputError('Google Drive não configurado.');
   if (type === 'drive-datasets') {
     const history = remoteDatasetHistoryRoot(drive, new Date().toISOString().replace(/[:.]/g, '-'));
     return [drive.executable, 'sync', farmPaths.datasets, remoteDatasetsRoot(drive),
@@ -179,19 +183,28 @@ export async function buildCommand(type: JobType, options: Record<string, unknow
   ];
 }
 
-async function persist(job: Job) {
+function persist(job: Job) {
   const root = path.join(config.dataRoot, 'jobs');
-  await fs.mkdir(root, { recursive: true });
-  await fs.writeFile(
-    path.join(root, `${job.id}.json`),
-    `${JSON.stringify(job, null, 2)}\n`,
-    'utf8',
-  );
+  const target = path.join(root, `${job.id}.json`);
+  const content = `${JSON.stringify(job, null, 2)}\n`;
+  const write = async () => {
+    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+    await fs.mkdir(root, { recursive: true });
+    try {
+      await fs.writeFile(temporary, content, 'utf8');
+      await fs.rename(temporary, target);
+    } finally { await fs.rm(temporary, { force: true }); }
+  };
+  const current = (pendingWrites.get(job.id) || Promise.resolve()).then(write, write).finally(() => {
+    if (pendingWrites.get(job.id) === current) pendingWrites.delete(job.id);
+  });
+  pendingWrites.set(job.id, current);
+  return current;
 }
 
 function emit(job: Job) {
   jobEvents.emit('update', job);
-  void persist(job);
+  void persist(job).catch(console.error);
 }
 
 export function listJobs() {
@@ -202,38 +215,45 @@ export function getJob(id: string) {
   return jobs.get(id);
 }
 
+export async function withIdleJobs<T>(task: () => Promise<T>): Promise<T> {
+  if (creatingJob || processes.size || listJobs().some((job) => job.status === 'queued' || job.status === 'running')) {
+    throw new JobBusyError('Já existe uma operação em andamento. Aguarde a conclusão antes de iniciar outra.');
+  }
+  creatingJob = true;
+  try { return await task(); }
+  finally { creatingJob = false; }
+}
+
 export async function createJob(type: JobType, options: Record<string, unknown>) {
   if (!config.allowFarmGuardJobs) {
-    throw new Error(
+    throw new JobsDisabledError(
       'Operacoes desativadas. Defina ALLOW_FARMGUARD_JOBS=true somente depois de autorizar escritas de resultados no FarmGuard.',
     );
   }
-  if (creatingJob || listJobs().some((job) => job.status === 'queued' || job.status === 'running')) {
-    throw new Error('Já existe uma operação em andamento. Aguarde a conclusão antes de iniciar outra.');
-  }
-  creatingJob = true;
-  let command: string[];
-  let calibration: CalibrationContext | undefined;
-  try {
-    if (type === 'tune') calibration = await prepareCalibration(modelIdForPath(
-      String(options.model || path.join(farmPaths.models, 'insect-detector.pt'))));
-    command = await buildCommand(type, options, calibration);
-  }
-  finally { creatingJob = false; }
-  const job: Job = {
-    id: crypto.randomUUID(),
-    type,
-    status: 'queued',
-    createdAt: new Date().toISOString(),
-    command,
-    logs: [],
-    logCount: 0,
-    calibration,
-  };
-  jobs.set(job.id, job);
-  emit(job);
-  queueMicrotask(() => run(job));
-  return job;
+  return withIdleJobs(async () => {
+    if (typeof options.modelId === 'string') {
+      try { options = { ...options, model: (await resolveModel(options.modelId)).path }; }
+      catch { throw new JobInputError('Modelo do catálogo inválido ou indisponível.'); }
+    }
+    const calibration = type === 'tune' ? await prepareCalibration(modelIdForPath(
+      String(options.model || path.join(farmPaths.models, 'insect-detector.pt')))) : undefined;
+    const command = await buildCommand(type, options, calibration);
+    const job: Job = {
+      id: crypto.randomUUID(),
+      type,
+      status: 'queued',
+      createdAt: new Date().toISOString(),
+      command,
+      logs: [],
+      logCount: 0,
+      calibration,
+    };
+    await persist(job);
+    jobs.set(job.id, job);
+    jobEvents.emit('update', job);
+    queueMicrotask(() => run(job));
+    return job;
+  });
 }
 
 function run(job: Job) {

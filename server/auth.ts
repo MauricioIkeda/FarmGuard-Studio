@@ -84,6 +84,8 @@ export function currentSession(request: Request) {
 }
 
 export function requireAuth(request: Request, response: Response, next: NextFunction) {
+  const workerToken = request.get('x-farmguard-studio-worker-token');
+  if (config.iaApiInternalToken && workerToken && safeEqual(workerToken, config.iaApiInternalToken)) return next();
   if (currentSession(request)) return next();
   response.status(401).json({ error: 'Autenticacao necessaria.' });
 }

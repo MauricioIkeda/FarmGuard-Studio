@@ -45,6 +45,9 @@ export type CalibrationContext = {
 };
 
 const calibrationRoot = path.join(config.dataRoot, 'calibrations');
+export class ModelInputError extends Error {
+  constructor(message: string, readonly status = 400) { super(message); }
+}
 const promotedWeight = path.join(farmPaths.models, 'insect-detector.pt');
 const promotedConfig = path.join(farmPaths.models, 'insect-detector.json');
 let promotionBusy = false;
@@ -60,15 +63,15 @@ function inside(root: string, target: string) {
 
 export async function resolveModel(id: string) {
   const match = /^(model|run):(.+\.pt)$/i.exec(id);
-  if (!match) throw new Error('Modelo inválido. Selecione um peso catalogado pelo Studio.');
+  if (!match) throw new ModelInputError('Modelo inválido. Selecione um peso catalogado pelo Studio.');
   const root = match[1] === 'model' ? farmPaths.models : farmPaths.runs;
   const target = path.resolve(root, match[2]);
-  if (!inside(root, target)) throw new Error('Caminho de modelo fora do FarmGuard.');
+  if (!inside(root, target)) throw new ModelInputError('Caminho de modelo fora do FarmGuard.');
   const realRoot = await fs.realpath(root);
   const realTarget = await fs.realpath(target);
-  if (!inside(realRoot, realTarget)) throw new Error('O peso aponta para fora do FarmGuard.');
+  if (!inside(realRoot, realTarget)) throw new ModelInputError('O peso aponta para fora do FarmGuard.');
   const stat = await fs.stat(realTarget);
-  if (!stat.isFile()) throw new Error('Peso não encontrado.');
+  if (!stat.isFile()) throw new ModelInputError('Peso não encontrado.', 404);
   return { id, path: realTarget, stat };
 }
 
@@ -277,18 +280,18 @@ function inspectModel(file: string): Promise<{ architecture: string; class_names
 }
 
 export async function promoteModel(modelId: string) {
-  if (!config.allowFarmGuardJobs) throw new Error('Publicação de modelo desativada.');
-  if (promotionBusy) throw new Error('Uma promoção já está em andamento.');
+  if (!config.allowFarmGuardJobs) throw new ModelInputError('Publicação de modelo desativada.', 403);
+  if (promotionBusy) throw new ModelInputError('Uma promoção já está em andamento.', 409);
   promotionBusy = true;
   let tempWeight = '';
   let tempConfig = '';
   try {
     const model = await resolveModel(modelId);
     if (model.path === await fs.realpath(promotedWeight).catch(() => promotedWeight)) {
-      throw new Error('Este já é o arquivo principal.');
+      throw new ModelInputError('Este já é o arquivo principal.', 409);
     }
     const calibration = await readCalibration(modelId);
-    if (!calibration || calibration.stale) throw new Error('Calibre este peso com o dataset atual antes de promovê-lo.');
+    if (!calibration || calibration.stale) throw new ModelInputError('Calibre este peso com o dataset atual antes de promovê-lo.', 409);
     const info = await inspectModel(model.path);
     const backupRoot = path.join(config.dataRoot, 'promotions', `${new Date().toISOString().replaceAll(':', '-')}-${crypto.randomUUID()}`);
     await fs.mkdir(backupRoot, { recursive: true });

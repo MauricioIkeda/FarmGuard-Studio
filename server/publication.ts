@@ -6,6 +6,8 @@ import { config, farmPaths } from './config.js';
 import type { Annotation } from './farmguard.js';
 import { imageFor, sourceImage } from './annotation-source.js';
 
+export class PublicationInputError extends Error {}
+
 export type PublicationChange = {
   key: string;
   image: string;
@@ -76,7 +78,7 @@ export async function publishDrafts(keys: string[]) {
     (await publicationPlan()).filter((item) => item.changed).map((item) => item.key),
   );
   const selected = [...new Set(keys)].filter((key) => allowed.has(key));
-  if (!selected.length) throw new Error('Nenhum rascunho alterado foi selecionado.');
+  if (!selected.length) throw new PublicationInputError('Nenhum rascunho alterado foi selecionado.');
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupRoot = path.join(config.dataRoot, 'publication-backups', timestamp);
   await fs.mkdir(backupRoot, { recursive: true });
